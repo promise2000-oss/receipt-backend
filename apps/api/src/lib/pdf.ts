@@ -1,9 +1,11 @@
+import { existsSync } from "node:fs";
 import type { Browser } from "puppeteer";
 import { env } from "./env";
 import { renderReceiptHtml, type DocumentData } from "./document";
 
 let browserPromise: Promise<Browser> | null = null;
-let executableHinted = false;
+let bundledHinted = false;
+let resolvedHinted = false;
 
 const LAUNCH_ARGS = [
   "--no-sandbox",
@@ -11,6 +13,18 @@ const LAUNCH_ARGS = [
   "--disable-dev-shm-usage",
   "--font-render-hinting=none",
   "--disable-gpu",
+];
+
+// Distro browsers. The Dockerfile guarantees at least one of these exists, and
+// we probe the paths directly: Puppeteer's `channel` lookup only ever checks
+// /opt/google/chrome, which Debian never populates — that dead end is what
+// turned a missing bundled download into an opaque 500 on every PDF.
+const DISTRO_BROWSERS = [
+  "/usr/bin/chromium",
+  "/usr/bin/chromium-browser",
+  "/usr/bin/google-chrome-stable",
+  "/usr/bin/google-chrome",
+  "/opt/google/chrome/chrome",
 ];
 
 async function launchBrowser(): Promise<Browser> {
@@ -21,20 +35,34 @@ async function launchBrowser(): Promise<Browser> {
   }
 
   try {
-    // Bundled Chromium, downloaded during `npm install`.
+    // Chrome for Testing, downloaded into PUPPETEER_CACHE_DIR during `npm ci`.
     return await puppeteerLaunch(base);
   } catch (bundledError) {
-    if (!executableHinted) {
-      executableHinted = true;
+    if (!bundledHinted) {
+      bundledHinted = true;
       // eslint-disable-next-line no-console
       console.warn(
-        "[pdf] Bundled Chromium unavailable, falling back to an installed Chrome.\n" +
+        "[pdf] Bundled Chrome unavailable, trying the distro browser.\n" +
           `      ${String((bundledError as Error)?.message ?? bundledError).split("\n")[0]}`,
       );
     }
-    // Fall back to whatever Chrome/Chromium is on the machine.
-    return await puppeteerLaunch({ ...base, channel: "chrome" });
   }
+
+  for (const candidate of DISTRO_BROWSERS) {
+    if (!existsSync(candidate)) continue;
+    if (!resolvedHinted) {
+      resolvedHinted = true;
+      // eslint-disable-next-line no-console
+      console.warn(`[pdf] Using distro browser at ${candidate}`);
+    }
+    return puppeteerLaunch({ ...base, executablePath: candidate });
+  }
+
+  throw new Error(
+    "No browser available for PDF generation: neither Chrome for Testing nor a " +
+      "distro chromium was found in the image (checked " +
+      `${DISTRO_BROWSERS.join(", ")}).`,
+  );
 }
 
 async function puppeteerLaunch(options: Parameters<typeof import("puppeteer").default.launch>[0]) {

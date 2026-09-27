@@ -28,7 +28,10 @@ COPY apps/web/package.json apps/web/
 # path must be pinned *here*: the default is $HOME/.cache, which the runtime
 # stage's COPY would not find.
 ENV PUPPETEER_CACHE_DIR=/app/.cache/puppeteer
-RUN npm ci
+# The explicit install repeats what puppeteer's postinstall should have done,
+# so a skipped or allowlisted lifecycle script can never leave the image
+# without a browser — the failure mode that made every receipt PDF 500.
+RUN npm ci && npx puppeteer browsers install chrome
 
 COPY tsconfig.base.json ./
 COPY packages/shared packages/shared
@@ -98,6 +101,23 @@ COPY --from=build /app/apps/api ./apps/api
 COPY --from=build /app/apps/web ./apps/web
 # Chrome for Testing, fetched during `npm ci` above.
 COPY --from=build /app/.cache/puppeteer ./.cache/puppeteer
+
+# A browser is not optional: without one the first receipt PDF 500s with
+# "Bundled Chromium unavailable", and the runtime has no system Chrome to fall
+# back on. Check that Chrome for Testing actually landed in the image, and if
+# it didn't, install the distro build — pdf.ts probes /usr/bin/chromium too.
+# Either way, the build fails loudly here instead of at the first PDF request.
+RUN if ls -d "$PUPPETEER_CACHE_DIR"/chrome/*/*/chrome >/dev/null 2>&1; then \
+      echo "Chrome for Testing present in $PUPPETEER_CACHE_DIR"; \
+    else \
+      echo "Chrome for Testing missing — installing distro chromium"; \
+      apt-get update \
+       && apt-get install -y --no-install-recommends chromium \
+       && rm -rf /var/lib/apt/lists/*; \
+    fi \
+ && { ls -d "$PUPPETEER_CACHE_DIR"/chrome/*/*/chrome >/dev/null 2>&1 \
+      || command -v chromium >/dev/null 2>&1; } \
+ || { echo "FATAL: no browser in the image" >&2; exit 1; }
 
 # The persistent disk mounts here; seed it so a fresh volume is never empty.
 RUN mkdir -p /data/storage
