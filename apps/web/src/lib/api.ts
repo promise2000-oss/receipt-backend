@@ -94,7 +94,7 @@ export async function apiText(path: string, options: RequestOptions = {}): Promi
 }
 
 /** Fetch a binary resource (PDF) as a Blob. */
-export async function apiBlob(path: string): Promise<Blob> {
+async function apiBlob(path: string): Promise<Blob> {
   const response = await fetch(path, { credentials: "include" });
   if (!response.ok) throw await parseError(response);
   return response.blob();

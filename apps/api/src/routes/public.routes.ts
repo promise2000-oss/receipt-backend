@@ -7,7 +7,6 @@ import { verifyShareToken } from "../lib/tokens";
 import { getOrCreateReceiptPdf, ensureReceiptPdf } from "../lib/pdfStore";
 import { buildDocumentData } from "../lib/documentData";
 import { renderReceiptHtml } from "../lib/document";
-import { absoluteUrl } from "../lib/url";
 import type { ReceiptWithRelations } from "../mappers";
 import { num } from "../mappers";
 
@@ -151,12 +150,3 @@ publicRouter.post(
     res.send(buffer);
   }),
 );
-
-/** Helper used by the WhatsApp share link builder in the UI. */
-export function whatsappUrl(number: string | null | undefined, message: string): string {
-  const digits = (number ?? "").replace(/[^\d]/g, "");
-  const text = encodeURIComponent(message);
-  return digits ? `https://wa.me/${digits}?text=${text}` : `https://wa.me/?text=${text}`;
-}
-
-export { absoluteUrl };

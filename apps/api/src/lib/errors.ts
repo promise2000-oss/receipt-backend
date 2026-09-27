@@ -16,11 +16,5 @@ export class AppError extends Error {
 export const notFound = (what = "Resource") =>
   new AppError(`${what} not found`, 404, "NOT_FOUND");
 
-export const unauthorized = (message = "Authentication required") =>
-  new AppError(message, 401, "UNAUTHORIZED");
-
-export const forbidden = (message = "You do not have access to this") =>
-  new AppError(message, 403, "FORBIDDEN");
-
 export const conflict = (message: string, code = "CONFLICT") =>
   new AppError(message, 409, code);

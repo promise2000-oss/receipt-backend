@@ -20,10 +20,6 @@ export const BRAND = {
   rule: "#E7DFCE",
 } as const;
 
-/** Defaults applied to a brand new business. */
-export const DEFAULT_BRAND_PRIMARY = BRAND.ink;
-export const DEFAULT_BRAND_ACCENT = BRAND.gold;
-
 /** Every currency the receipt builder offers out of the box. */
 export const CURRENCIES: Array<{ code: string; label: string }> = [
   { code: "NGN", label: "Nigerian Naira (₦)" },

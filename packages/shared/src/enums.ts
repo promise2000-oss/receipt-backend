@@ -29,11 +29,6 @@ export const PAYMENT_STATUS_LABELS: Record<PaymentStatus, string> = {
   pending: "Pending",
 };
 
-export const RECEIPT_STATUS_LABELS: Record<ReceiptStatus, string> = {
-  active: "Active",
-  void: "Void",
-};
-
 /**
  * Fields that become permanently frozen the moment a receipt is issued.
  * The API rejects any update that touches one of them — corrections are made

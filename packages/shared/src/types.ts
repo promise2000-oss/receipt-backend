@@ -109,18 +109,6 @@ export interface Paginated<T> {
   limit: number;
 }
 
-export interface ReceiptQuery {
-  search?: string;
-  status?: ReceiptStatus | "all";
-  payment_status?: PaymentStatus | "all";
-  from?: string;
-  to?: string;
-  min?: number;
-  max?: number;
-  page?: number;
-  limit?: number;
-}
-
 export interface ShareDTO {
   token: string;
   url: string;

@@ -12,8 +12,3 @@ export function getStorage(): Storage {
   instance = env.storageDriver === "s3" ? new S3Storage() : new LocalDiskStorage(env.storageDir);
   return instance;
 }
-
-/** Test hook — lets the suite point at a scratch directory. */
-export function setStorage(storage: Storage | null): void {
-  instance = storage;
-}

@@ -148,7 +148,6 @@ export const receiptItemSchema = z
       });
     }
   });
-export type ReceiptItemInput = z.infer<typeof receiptItemSchema>;
 
 export const receiptCreateSchema = z.object({
   customer_id: z.string().trim().min(1).nullish(),

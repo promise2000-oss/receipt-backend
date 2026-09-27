@@ -12,8 +12,3 @@ export function getMailer(): MailTransport {
   transport = env.mailDriver === "smtp" ? new SmtpMailTransport() : new ConsoleMailTransport();
   return transport;
 }
-
-/** Test hook. */
-export function setMailer(next: MailTransport | null): void {
-  transport = next;
-}
