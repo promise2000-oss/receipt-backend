@@ -74,7 +74,10 @@ npm run build       # shared → api (tsc) → web (next build)
 
 - One web service, one container: Next.js on `$PORT` (public), Express on
   `:4000` (private to the container). The browser only talks to Next.js.
+- **Blueprint is configured for the `free` tier**: no disk (free services
+  cannot have one), so `STORAGE_DIR` is ephemeral — re-deploys and the
+  15-minute spin-down delete uploaded logos and PDFs. Moving off `free`
+  means setting a paid `plan:` and re-enabling the commented `disk:` block.
+- Free Postgres expires **30 days after creation**; export or upgrade.
 - Swagger UI lives at `/api/docs`, raw spec at `/api/docs/openapi.json`
   (`DOCS_ENABLED=false` turns it off).
-- `STORAGE_DIR=/data/storage` points at the attached persistent disk — move it
-  and every uploaded logo and generated PDF is lost.

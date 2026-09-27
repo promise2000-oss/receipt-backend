@@ -1,10 +1,9 @@
-# Eleosstyles Receipt System — Render Blueprint
+# Eleosstyles Receipt System — Render Blueprint (free tier)
 #
 # Render reads this file and creates the whole deployment:
 #
 #   * one web service, built from ./Dockerfile (Next.js + API in one container)
 #   * one managed PostgreSQL 17 database
-#   * a persistent disk for uploaded logos and generated PDFs
 #
 # Setup:
 #   1. Push this repo to GitHub — see AGENTS.md, `.playwright-mcp/` must never
@@ -15,6 +14,29 @@
 # Why one service? The browser only ever talks to Next.js, which rewrites
 # /api/* to the Express API on :4000 *inside the container*. That keeps the
 # session cookie same-origin (no CORS), and it is how the app runs locally.
+#
+# ---------------------------------------------------------------------------
+# FREE TIER — what you are signing up for (docs.render.com/free)
+#
+#   * 0.1 CPU / 512 MB RAM. Chromium is the big consumer when it prints a
+#     PDF, so budget carefully — pdf.ts already passes --no-sandbox,
+#     --disable-dev-shm-usage and --disable-gpu for exactly this environment.
+#   * Spins down after 15 minutes of no traffic; the first request then takes
+#     ~60 s to wake it up.
+#   * 750 free instance hours per month; spun-down time does not count.
+#   * NO persistent disks on the free plan → uploaded logos and generated
+#     PDFs are deleted on every re-deploy, restart *and* spin-down. Keep
+#     STORAGE_DRIVER=local only while demoing; for anything real, switch to
+#     S3-compatible storage (Cloudflare R2 has a free tier) — env vars below.
+#   * SMTP is blocked (ports 25/465/587), so mail can only be logged with
+#     MAIL_DRIVER=console.
+#   * Free Postgres: 1 GB, no backups, and it EXPIRES 30 DAYS AFTER CREATION
+#     (14-day grace to upgrade, then the data is deleted).
+#
+# To upgrade later: set `plan:` below to a paid compute plan (free is $0,
+# 0.5c-512mb is $7/mo, 1c-2g is $25/mo) and re-enable the commented `disk:`
+# block — disks only exist on paid plans.
+# ---------------------------------------------------------------------------
 
 version: "1"
 
@@ -24,20 +46,20 @@ services:
     runtime: docker
     dockerfilePath: ./Dockerfile
     dockerContext: .
-    # 1c-2g is the floor for this app: `next build` plus Puppeteer's Chromium
-    # OOM on 512MB. Disks also require a paid plan — `free` has none, so
-    # uploaded logos and PDFs would vanish on every re-deploy.
-    plan: 1c-2g
-    # Probes GET /api/health through the Next.js proxy on the public port, so a
-    # deploy is only marked live once both processes answer.
+    # `free` = 0.1 CPU / 512 MB. Disks are unavailable at this tier, which is
+    # why there is no `disk:` block in the active config.
+    plan: free
+    # Probes GET /api/health through the Next.js proxy on the public port, so
+    # a deploy is only marked live once both processes answer.
     healthCheckPath: /api/health
     # Migrations run in the container's CMD, and each instance would run them
     # on boot — stay at one instance unless you move them to preDeployCommand.
     numInstances: 1
-    disk:
-      name: eleosstyles-files
-      mountPath: /data/storage
-      sizeGB: 1
+    # ── when you move off `free`, uncomment this to survive re-deploys ──
+    # disk:
+    #   name: eleosstyles-files
+    #   mountPath: /data/storage
+    #   sizeGB: 1
     envVars:
       # Supplied by Render from the database declared below.
       - key: DATABASE_URL
@@ -53,13 +75,21 @@ services:
       # Next.js proxies /api/* here. Private to the container.
       - key: API_INTERNAL_URL
         value: http://localhost:4000
-      # Logos and generated PDFs live on the disk mounted above.
+      # Ephemeral on the free plan: re-deploys and spin-downs erase this
+      # directory. Switch to S3 for durability:
+      #   STORAGE_DRIVER=s3
+      #   S3_ENDPOINT=https://<account>.r2.cloudflarestorage.com
+      #   S3_REGION=auto
+      #   S3_BUCKET=receipts
+      #   S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY
+      #   S3_FORCE_PATH_STYLE=true
       - key: STORAGE_DRIVER
         value: local
       - key: STORAGE_DIR
         value: /data/storage
-      # `console` logs mail instead of sending it. For real mail, switch to
-      # MAIL_DRIVER=smtp and add SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS.
+      # `console` logs mail instead of sending it — the only option on the
+      # free plan, which blocks outbound SMTP. For paid SMTP, set
+      # MAIL_DRIVER=smtp plus SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS.
       - key: MAIL_DRIVER
         value: console
       # Swagger UI at /api/docs — set to "false" to take it down.
@@ -79,6 +109,7 @@ databases:
     user: eleos
     # Matches docker-compose (postgres:17) and Prisma 6's tested range.
     postgresMajorVersion: "17"
-    # Cheapest paid tier. `free` also works but expires and has no backups;
-    # tighten ipAllowList in the dashboard if you do not need external access.
-    plan: 0.1c-256mb
+    # Free: 1 GB, no backups, EXPIRES 30 DAYS AFTER CREATION (then a 14-day
+    # grace period before deletion). Use `free` while evaluating; move to
+    # 0.1c-256mb ($6/mo) or higher before you care about the data.
+    plan: free
