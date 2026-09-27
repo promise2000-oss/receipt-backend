@@ -20,11 +20,16 @@ export const passwordField = z
   .min(8, "Password must be at least 8 characters")
   .max(200, "Password is too long");
 
+// `.nullish()` rather than `.optional()`: clients legitimately express "no
+// phone" as JSON `null` (the signup form sends `phone: "" || null`), and
+// `.optional()` only admits `undefined` — a null would be rejected with
+// "expected string, received null" *before* the transform could normalise it,
+// which locked every new signup out of the product.
 export const phoneField = z
   .string()
   .trim()
   .max(40, "Phone number is too long")
-  .optional()
+  .nullish()
   .transform((v) => (v ? v : null));
 
 /** Positive money amount with at most 2 decimals. */
@@ -170,11 +175,13 @@ export const receiptCreateSchema = z.object({
   payment_method: z.enum(PAYMENT_METHODS as [string, ...string[]]).default("cash"),
   payment_status: z.enum(PAYMENT_STATUSES as [string, ...string[]]).default("paid"),
   paid_amount: amountField.optional(),
+  // See phoneField: the receipt form posts `notes: notes.trim() || null`, and
+  // `.optional()` rejects that null before the transform can normalise it.
   notes: z
     .string()
     .trim()
     .max(1000)
-    .optional()
+    .nullish()
     .transform((v) => (v ? v : null)),
 });
 export type ReceiptCreateInput = z.infer<typeof receiptCreateSchema>;

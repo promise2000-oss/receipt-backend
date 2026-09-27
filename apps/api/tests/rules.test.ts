@@ -124,6 +124,45 @@ describe("authentication", () => {
       .set("Cookie", "el_session=eyJhbGciOiJIUzI1NiJ9.forged.signature");
     expect(response.status).toBe(401);
   });
+
+  // Regression: the signup form sends `phone: form.phone || null`, but
+  // phoneField was `.optional()` — which admits `undefined` and not `null` —
+  // so every browser signup 422'd with "expected string, received null".
+  // The suite missed it because createTenant omits the key entirely.
+  it("signs up when phone is sent as null, as the browser does", async () => {
+    const email = `null-phone-${stamp}@test.local`;
+    const response = await request(app).post("/api/auth/signup").send({
+      business: { name: "Null Phone Ltd", currency: "NGN" },
+      user: {
+        full_name: "Null Phone Owner",
+        email,
+        password: "testing12345",
+        phone: null,
+      },
+    });
+
+    expect(response.status, JSON.stringify(response.body)).toBe(201);
+    expect(response.body.user.phone).toBeNull();
+
+    const stored = await prisma.user.findUnique({ where: { email } });
+    expect(stored?.phone).toBeNull();
+  });
+
+  it("still stores a phone when one is provided", async () => {
+    const email = `with-phone-${stamp}@test.local`;
+    const response = await request(app).post("/api/auth/signup").send({
+      business: { name: "With Phone Ltd", currency: "NGN" },
+      user: {
+        full_name: "With Phone Owner",
+        email,
+        password: "testing12345",
+        phone: "0803 000 0000",
+      },
+    });
+
+    expect(response.status, JSON.stringify(response.body)).toBe(201);
+    expect(response.body.user.phone).toBe("0803 000 0000");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -383,6 +422,15 @@ describe("server-side totals", () => {
       items: [{ description: "Negative", quantity: -2, unit_price: 100 }],
     });
     expect(response.status).toBe(422);
+  });
+
+  // Regression, same class as the signup phone bug: the receipt form posts
+  // `notes: notes.trim() || null`, which `.optional()` rejected outright — so
+  // the core "create a receipt without notes" flow 422'd.
+  it("accepts notes sent as null, as the receipt form does", async () => {
+    const response = await createReceipt(tenantA, { notes: null });
+    expect(response.status, JSON.stringify(response.body)).toBe(201);
+    expect(response.body.notes).toBeNull();
   });
 });
 
