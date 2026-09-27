@@ -24,14 +24,26 @@ COPY packages/shared/package.json packages/shared/
 COPY apps/api/package.json apps/api/
 COPY apps/web/package.json apps/web/
 
-# Puppeteer downloads its matching Chrome for Testing while `npm ci` runs. The
-# path must be pinned *here*: the default is $HOME/.cache, which the runtime
-# stage's COPY would not find.
+# Puppeteer downloads its matching Chrome for Testing while `npm ci` runs, and
+# the cache path must be pinned *here*: the default is $HOME/.cache, which the
+# runtime stage's COPY would not find.
+#
+# That postinstall turned out not to be reliable: it left an *incomplete*
+# browser in the image — the folder chrome/linux-154.0.8037.57 existed but its
+# executable did not — and still exited 0, which is why every receipt PDF 500'd
+# with "Could not find Chrome (ver. 154.0.8037.57)". A partial download is
+# never retried on its own: @puppeteer/browsers refuses to overwrite it and
+# asks you to delete it first. So delete any partial copy, then install cleanly.
+#
+# A failure here is tolerated rather than fatal — the runtime stage installs
+# distro chromium as a fallback, and only fails the build when neither browser
+# could be obtained.
 ENV PUPPETEER_CACHE_DIR=/app/.cache/puppeteer
-# The explicit install repeats what puppeteer's postinstall should have done,
-# so a skipped or allowlisted lifecycle script can never leave the image
-# without a browser — the failure mode that made every receipt PDF 500.
-RUN npm ci && npx puppeteer browsers install chrome
+RUN npm ci \
+ && mkdir -p "$PUPPETEER_CACHE_DIR" \
+ && rm -rf "$PUPPETEER_CACHE_DIR"/chrome \
+ && (npx puppeteer browsers install chrome \
+     || echo "WARNING: Chrome for Testing unavailable — runtime will use distro chromium")
 
 COPY tsconfig.base.json ./
 COPY packages/shared packages/shared
