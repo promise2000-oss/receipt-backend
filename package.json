@@ -1,0 +1,43 @@
+{
+  "name": "eleosstyles-receipt-system",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Eleosstyles Receipt System — create, brand, send and track sales receipts.",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build:shared": "npm run build --workspace @eleos/shared",
+    "db:start": "npm run db:start --workspace @eleos/api",
+    "db:setup": "npm run db:setup --workspace @eleos/api",
+    "db:migrate": "npm run db:migrate --workspace @eleos/api",
+    "db:deploy": "npm run db:deploy --workspace @eleos/api",
+    "db:seed": "npm run db:seed --workspace @eleos/api",
+    "db:reset": "npm run db:reset --workspace @eleos/api",
+    "dev": "npm run build:shared && concurrently -n api,web -c black,blue \"npm:dev:api\" \"npm:dev:web\"",
+    "dev:api": "npm run dev --workspace @eleos/api",
+    "dev:web": "npm run dev --workspace @eleos/web",
+    "build": "npm run build:shared && npm run build --workspace @eleos/api && npm run build --workspace @eleos/web",
+    "start": "concurrently -n api,web -c black,blue \"npm:start:api\" \"npm:start:web\"",
+    "start:api": "npm run start --workspace @eleos/api",
+    "start:web": "npm run start --workspace @eleos/web",
+    "test": "npm run test --workspace @eleos/api",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.5",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "allowScripts": {
+    "@embedded-postgres/windows-x64@17.10.0-beta.17": true,
+    "@prisma/client@6.19.3": true,
+    "@prisma/engines@6.19.3": true,
+    "esbuild@0.28.2": true,
+    "prisma@6.19.3": true,
+    "puppeteer@25.12.0": true
+  }
+}

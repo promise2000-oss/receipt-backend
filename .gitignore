@@ -1,0 +1,30 @@
+node_modules/
+.next/
+dist/
+build/
+coverage/
+*.tsbuildinfo
+
+# local database + object storage (any depth — src/ and dist/ both write here)
+apps/api/.pgdata/
+**/.storage/
+apps/api/prisma/*.db
+
+# secrets
+.env
+.env.local
+.env.*.local
+
+# logs / os
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+
+# local screenshots / inspection artefacts
+shots/
+.playwright-mcp/
+
+# editors
+.vscode/
+.idea/

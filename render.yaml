@@ -1,0 +1,84 @@
+# Eleosstyles Receipt System — Render Blueprint
+#
+# Render reads this file and creates the whole deployment:
+#
+#   * one web service, built from ./Dockerfile (Next.js + API in one container)
+#   * one managed PostgreSQL 17 database
+#   * a persistent disk for uploaded logos and generated PDFs
+#
+# Setup:
+#   1. Push this repo to GitHub — see AGENTS.md, `.playwright-mcp/` must never
+#      be committed (it is gitignored).
+#   2. Render dashboard → New → Blueprint → select the repo.
+#   3. Open https://eleosstyles-receipts.onrender.com and sign up.
+#
+# Why one service? The browser only ever talks to Next.js, which rewrites
+# /api/* to the Express API on :4000 *inside the container*. That keeps the
+# session cookie same-origin (no CORS), and it is how the app runs locally.
+
+version: "1"
+
+services:
+  - type: web
+    name: eleosstyles-receipts
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    # 1c-2g is the floor for this app: `next build` plus Puppeteer's Chromium
+    # OOM on 512MB. Disks also require a paid plan — `free` has none, so
+    # uploaded logos and PDFs would vanish on every re-deploy.
+    plan: 1c-2g
+    # Probes GET /api/health through the Next.js proxy on the public port, so a
+    # deploy is only marked live once both processes answer.
+    healthCheckPath: /api/health
+    # Migrations run in the container's CMD, and each instance would run them
+    # on boot — stay at one instance unless you move them to preDeployCommand.
+    numInstances: 1
+    disk:
+      name: eleosstyles-files
+      mountPath: /data/storage
+      sizeGB: 1
+    envVars:
+      # Supplied by Render from the database declared below.
+      - key: DATABASE_URL
+        fromDatabase:
+          name: eleosstyles-db
+          property: connectionString
+      # 256-bit, generated once and stored as a secret. Sessions break if it
+      # ever changes, so do not regenerate it casually.
+      - key: JWT_SECRET
+        generateValue: true
+      - key: NODE_ENV
+        value: production
+      # Next.js proxies /api/* here. Private to the container.
+      - key: API_INTERNAL_URL
+        value: http://localhost:4000
+      # Logos and generated PDFs live on the disk mounted above.
+      - key: STORAGE_DRIVER
+        value: local
+      - key: STORAGE_DIR
+        value: /data/storage
+      # `console` logs mail instead of sending it. For real mail, switch to
+      # MAIL_DRIVER=smtp and add SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS.
+      - key: MAIL_DRIVER
+        value: console
+      # Swagger UI at /api/docs — set to "false" to take it down.
+      - key: DOCS_ENABLED
+        value: "true"
+      # Share links and CORS default to Render's own RENDER_EXTERNAL_URL (see
+      # apps/api/src/lib/env.ts), so no public URL has to be hard-coded here.
+      # Uncomment only to override, e.g. after adding a custom domain:
+      # - key: PUBLIC_API_BASE_URL
+      #   value: https://receipts.example.com
+      # - key: API_ORIGIN
+      #   value: https://receipts.example.com
+
+databases:
+  - name: eleosstyles-db
+    databaseName: eleosstyles
+    user: eleos
+    # Matches docker-compose (postgres:17) and Prisma 6's tested range.
+    postgresMajorVersion: "17"
+    # Cheapest paid tier. `free` also works but expires and has no backups;
+    # tighten ipAllowList in the dashboard if you do not need external access.
+    plan: 0.1c-256mb

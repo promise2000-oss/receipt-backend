@@ -1,0 +1,153 @@
+// Eleosstyles Receipt System — PostgreSQL schema
+//
+// Tenant isolation is structural: every tenant-owned row carries business_id
+// and every query in the API is forced through a scope guard (see src/lib/prisma.ts).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  owner
+  staff
+}
+
+enum PaymentMethod {
+  cash
+  transfer
+  card
+  other
+}
+
+enum PaymentStatus {
+  paid
+  partial
+  pending
+}
+
+enum ReceiptStatus {
+  active
+  void
+}
+
+model Business {
+  id              String   @id @default(uuid())
+  name            String
+  logo_url        String?
+  address         String?
+  phone           String?
+  email           String?
+  currency        String   @default("NGN")
+  brand_primary   String   @default("#111111")
+  brand_accent    String   @default("#B8912F")
+  /// Prefix used when composing receipt numbers, e.g. ES → ES-000214
+  number_prefix   String   @default("ES")
+  /// Monotonic counter. Incremented under a row lock so numbers are unique
+  /// AND gap-free per business even when requests race.
+  receipt_counter Int      @default(0)
+  created_at      DateTime @default(now())
+
+  users     User[]
+  customers Customer[]
+  receipts  Receipt[]
+
+  @@map("businesses")
+}
+
+model User {
+  id            String   @id @default(uuid())
+  business_id   String
+  full_name     String
+  email         String   @unique
+  password_hash String
+  phone         String?
+  role          Role     @default(owner)
+  created_at    DateTime @default(now())
+
+  business      Business  @relation(fields: [business_id], references: [id], onDelete: Cascade)
+  receipts      Receipt[]
+
+  @@index([business_id])
+  @@map("users")
+}
+
+model Customer {
+  id           String   @id @default(uuid())
+  business_id  String
+  name         String
+  phone        String?
+  email        String?
+  created_at   DateTime @default(now())
+
+  business   Business   @relation(fields: [business_id], references: [id], onDelete: Cascade)
+  receipts   Receipt[]
+
+  @@index([business_id])
+  @@index([business_id, name])
+  @@map("customers")
+}
+
+model Receipt {
+  id                String        @id @default(uuid())
+  business_id       String
+  customer_id       String?
+  /// Unique per business, never globally: ES-000214
+  receipt_number    String
+  issue_date        DateTime      @default(now())
+  subtotal          Decimal       @db.Decimal(14, 2)
+  discount          Decimal       @default(0) @db.Decimal(14, 2)
+  tax               Decimal       @default(0) @db.Decimal(14, 2)
+  /// Percentage rate used to derive `tax`, kept so the document can render "VAT 7.5%"
+  tax_rate          Decimal       @default(0) @db.Decimal(5, 2)
+  total             Decimal       @db.Decimal(14, 2)
+  /// Amount actually received — gives `payment_status: partial` a meaning.
+  paid_amount       Decimal       @default(0) @db.Decimal(14, 2)
+  payment_method    PaymentMethod @default(cash)
+  payment_status    PaymentStatus @default(paid)
+  status            ReceiptStatus @default(active)
+  notes             String?
+  /// Set once the branded PDF has been rendered and stored.
+  pdf_url           String?
+  /// Audit trail for void + reissue. Rows are never deleted.
+  voided_at         DateTime?
+  void_reason       String?
+  /// The voided receipt this one replaces (reissue chain).
+  original_receipt_id String?
+  created_by        String
+  created_at        DateTime      @default(now())
+
+  business        Business     @relation(fields: [business_id], references: [id], onDelete: Cascade)
+  customer        Customer?    @relation(fields: [customer_id], references: [id], onDelete: SetNull)
+  created_by_user User         @relation(fields: [created_by], references: [id], onDelete: Restrict)
+  original_receipt Receipt?    @relation("Reissue", fields: [original_receipt_id], references: [id], onDelete: SetNull)
+  reissues         Receipt[]    @relation("Reissue")
+  items            ReceiptItem[]
+
+  /// The database, not the application, is the final authority on numbering.
+  @@unique([business_id, receipt_number])
+  @@index([business_id, created_at])
+  @@index([business_id, status])
+  @@index([business_id, issue_date])
+  @@map("receipts")
+}
+
+model ReceiptItem {
+  id          String  @id @default(uuid())
+  receipt_id  String
+  /// Keeps line order stable in the rendered document.
+  position    Int     @default(0)
+  description String
+  quantity    Decimal @db.Decimal(14, 3)
+  unit_price  Decimal @db.Decimal(14, 2)
+  line_total  Decimal @db.Decimal(14, 2)
+
+  receipt Receipt @relation(fields: [receipt_id], references: [id], onDelete: Cascade)
+
+  @@index([receipt_id])
+  @@map("receipt_items")
+}

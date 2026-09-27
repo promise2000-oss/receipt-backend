@@ -1,0 +1,75 @@
+# ---------------------------------------------------------------------------
+# Eleosstyles Receipt System — containerised deployment
+#
+# This is the "real PostgreSQL" path: it runs an official postgres:17 server
+# instead of the project-local embedded instance used during development.
+#
+#   cp .env.example .env      # then set a strong JWT_SECRET
+#   docker compose up --build
+#   docker compose exec api npx prisma db seed      # optional demo tenant
+#
+# Open http://localhost:3000 — the browser only ever talks to the Next.js
+# server, which proxies /api/* to the API container (same-origin cookies).
+# ---------------------------------------------------------------------------
+
+services:
+  db:
+    image: postgres:17-bookworm
+    environment:
+      POSTGRES_USER: eleos
+      POSTGRES_PASSWORD: eleos
+      POSTGRES_DB: eleosstyles
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U eleos -d eleosstyles"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      API_PORT: "4000"
+      DATABASE_URL: postgresql://eleos:eleos@db:5432/eleosstyles
+      # Read from your .env next to this file — generate one with:
+      #   node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
+      JWT_TTL_SECONDS: "604800"
+      SHARE_TTL_SECONDS: "604800"
+      # Browser-facing origin (through the Next.js proxy) — CORS allowlist.
+      API_ORIGIN: http://localhost:3000
+      # Private PDF/logo storage; the volume survives container restarts.
+      STORAGE_DRIVER: local
+      STORAGE_DIR: /data/storage
+      # console = log mails instead of sending them. Set MAIL_DRIVER=smtp and
+      # SMTP_* to deliver for real.
+      MAIL_DRIVER: console
+    volumes:
+      - storage:/data/storage
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        API_INTERNAL_URL: http://api:4000
+    depends_on:
+      - api
+    environment:
+      API_INTERNAL_URL: http://api:4000
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  storage:

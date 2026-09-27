@@ -1,0 +1,26 @@
+# Build artefacts and local state — everything is (re)created inside the image.
+node_modules
+**/node_modules
+**/dist
+**/.next
+**/tsconfig.tsbuildinfo
+
+# Local-only data and secrets
+apps/api/.pgdata
+apps/api/.storage
+.env
+.env.*
+!.env.example
+
+# Misc
+.git
+shots
+coverage
+**/*.log
+**/*.tsbuildinfo
+.playwright-mcp
+AGENTS.md
+README.md
+render.yaml
+Dockerfile
+docker-compose.yml
