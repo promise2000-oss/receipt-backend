@@ -5,6 +5,14 @@
 
 generator client {
   provider = "prisma-client-js"
+  // `native` = the machine running `prisma generate` (Windows in local dev).
+  // Render runs the built image on Debian 12 / OpenSSL 3.0, and a client built
+  // for `debian-openssl-1.1.x` cannot load there — the API would die at boot with
+  // PrismaClientInitializationError and take Next.js down with it. Listing the
+  // target explicitly makes `prisma generate` fetch that engine by name instead
+  // of relying on OpenSSL detection, which is what mis-detected 1.1.x in the
+  // build container.
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
 }
 
 datasource db {
