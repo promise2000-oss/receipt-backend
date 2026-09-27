@@ -95,7 +95,10 @@ export default function SettingsPage() {
     try {
       const formData = new FormData();
       formData.append("logo", file);
-      const updated = await api<BusinessDTO>("/api/business/logo", { formData });
+      const updated = await api<BusinessDTO>("/api/business/logo", {
+        method: "POST",
+        formData,
+      });
       updateBusiness(updated);
       setNotice("Logo updated.");
     } catch (err) {

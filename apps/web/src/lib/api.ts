@@ -29,13 +29,20 @@ export class ApiError extends Error {
   }
 }
 
-interface RequestOptions {
-  method?: "GET" | "POST" | "PATCH" | "DELETE" | "PUT";
-  body?: unknown;
-  /** FormData overrides the JSON content type automatically. */
-  formData?: FormData;
-  signal?: AbortSignal;
-}
+type HttpMethod = "GET" | "POST" | "PATCH" | "DELETE" | "PUT";
+
+/**
+ * FormData cannot ride on a GET: `fetch` rejects it with
+ * "Request with GET/HEAD method cannot have body" *before* sending anything, so
+ * the call fails with no request on the wire and no status code to inspect —
+ * the logo upload did exactly that, surfacing only as a generic client-side
+ * error. Requiring the method on the formData branch makes that a compile
+ * error instead.
+ */
+type RequestOptions = { body?: unknown; signal?: AbortSignal } & (
+  | { formData: FormData; method: Exclude<HttpMethod, "GET"> }
+  | { formData?: undefined; method?: HttpMethod }
+);
 
 async function parseError(response: Response): Promise<ApiError> {
   let payload: unknown = null;
