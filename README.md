@@ -64,16 +64,20 @@ cp .env.example .env
 node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"
 
 npm run db:start     # terminal 1 — embedded PostgreSQL 17 on :5433, leave it running
-npm run db:setup     # terminal 2 — creates the databases, migrates, seeds demo data
+npm run db:setup     # terminal 2 — creates the databases, migrates, seeds sample data
 npm run dev          # terminal 2 — API on :4000, web on :3000
 ```
 
-Open <http://localhost:3000> and sign in with the seeded demo tenant:
+The seed creates one business and one owner login, and it needs your own
+credentials — there is no built-in demo password. Set these in `.env` first:
 
 ```
-demo@eleosstyles.com
-password123
+SEED_OWNER_EMAIL=you@yourdomain.com
+SEED_OWNER_PASSWORD=change-me-to-something-strong
 ```
+
+Then open <http://localhost:3000> and sign in as `SEED_OWNER_EMAIL`, or create a
+different business at `/signup`.
 
 > No system PostgreSQL is needed: `npm run db:start` runs real PostgreSQL from
 > a project-local data directory (`apps/api/.pgdata`) with a UTF-8 cluster.
@@ -111,6 +115,7 @@ commented list). The important ones:
 | `STORAGE_DRIVER` | `local` (default, files under `apps/api/.storage`) or `s3` |
 | `MAIL_DRIVER` | `console` (default, logs mail) or `smtp` |
 | `SHARE_TTL_SECONDS` | Lifetime of public receipt links (default 7 days) |
+| `SEED_OWNER_EMAIL` / `SEED_OWNER_PASSWORD` | Owner login created by `npm run db:seed`. No default — the seed refuses to run without them. |
 | `DOCS_ENABLED` | Swagger UI at `/api/docs` (default `true`). Set `false` to take it down on a public deployment. |
 | `PUPPETEER_EXECUTABLE_PATH` | Override the Chromium used for PDFs |
 

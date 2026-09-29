@@ -118,14 +118,6 @@ function LoginForm() {
             Create your business account
           </Link>
         </p>
-
-        <div className="mt-10 rounded-xl border border-rule bg-cream-deep/60 px-4 py-3">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-gold">
-            Demo account
-          </p>
-          <p className="mt-1 font-mono text-xs text-ink">demo@eleosstyles.com</p>
-          <p className="font-mono text-xs text-ink">password123</p>
-        </div>
       </div>
     </div>
   );

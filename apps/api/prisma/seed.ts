@@ -12,8 +12,25 @@ import { computeTotals } from "@eleos/shared";
 
 const prisma = new PrismaClient();
 
-const DEMO_EMAIL = "demo@eleosstyles.com";
-const DEMO_PASSWORD = "password123";
+/**
+ * Owner credentials for the seeded business.
+ *
+ * There is no default. A checked-in `demo@…` / `password123` pair is a real
+ * login on any deployment that ran this seed, so the values come from the
+ * environment and the script refuses to run without them.
+ */
+function requiredEnv(name: string): string {
+  const value = process.env[name];
+  if (!value) {
+    throw new Error(
+      `Missing ${name}. Set it in .env (e.g. SEED_OWNER_EMAIL=you@yourdomain.com) before seeding.`,
+    );
+  }
+  return value;
+}
+
+const OWNER_EMAIL = requiredEnv("SEED_OWNER_EMAIL").trim().toLowerCase();
+const OWNER_PASSWORD = requiredEnv("SEED_OWNER_PASSWORD");
 
 function daysAgo(days: number, hour = 11): Date {
   const date = new Date();
@@ -23,19 +40,19 @@ function daysAgo(days: number, hour = 11): Date {
 }
 
 async function main(): Promise<void> {
-  const existing = await prisma.user.findUnique({ where: { email: DEMO_EMAIL } });
+  const existing = await prisma.user.findUnique({ where: { email: OWNER_EMAIL } });
   if (existing) {
     // eslint-disable-next-line no-console
-    console.log(`[seed] "${DEMO_EMAIL}" already exists — nothing to do.`);
+    console.log(`[seed] "${OWNER_EMAIL}" already exists — nothing to do.`);
     return;
   }
 
   const business = await prisma.business.create({
     data: {
-      name: "Eleosstyles Boutique",
-      email: "hello@eleosstyles.com",
-      phone: "+234 801 234 5678",
-      address: "14 Admiralty Way, Lekki Phase 1, Lagos",
+      name: "Eleosstyles",
+      email: "eleosstyles35@gmail.com",
+      phone: "+234 806 091 7562",
+      address: "No. 4, Owobamigbe Street, Ala Garage, Nepa, Akure",
       currency: "NGN",
       brand_primary: "#111111",
       brand_accent: "#B8912F",
@@ -46,10 +63,10 @@ async function main(): Promise<void> {
   const owner = await prisma.user.create({
     data: {
       business_id: business.id,
-      full_name: "Ada Obi",
-      email: DEMO_EMAIL,
-      password_hash: await bcrypt.hash(DEMO_PASSWORD, 10),
-      phone: "+234 801 234 5678",
+      full_name: "Eleosstyles",
+      email: OWNER_EMAIL,
+      password_hash: await bcrypt.hash(OWNER_PASSWORD, 10),
+      phone: "+234 806 091 7562",
       role: "owner",
     },
   });
@@ -215,9 +232,9 @@ async function main(): Promise<void> {
   console.log(
     [
       "",
-      "[seed] demo data created",
+      "[seed] sample data created",
       `  business : ${business.name}`,
-      `  login    : ${DEMO_EMAIL} / ${DEMO_PASSWORD}`,
+      `  login    : ${OWNER_EMAIL}`,
       `  receipts : ${seeds.length}`,
       "",
     ].join("\n"),
