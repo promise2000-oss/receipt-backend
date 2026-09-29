@@ -71,6 +71,26 @@ async function main(): Promise<void> {
     },
   });
 
+  // Sample customers and receipts are opt-in. By default the seed creates the
+  // business and its owner and nothing else, so a real install never opens on
+  // a ledger full of invented sales. Set SEED_SAMPLE_DATA=true when you want
+  // throwaway rows to exercise the dashboard and PDF rendering.
+  const withSampleData = process.env.SEED_SAMPLE_DATA === "true";
+  if (!withSampleData) {
+    // eslint-disable-next-line no-console
+    console.log(
+      [
+        "",
+        "[seed] business and owner created (no sample receipts)",
+        `  business : ${business.name}`,
+        `  login    : ${OWNER_EMAIL}`,
+        "  add sample customers/receipts with SEED_SAMPLE_DATA=true",
+        "",
+      ].join("\n"),
+    );
+    return;
+  }
+
   const customers = await Promise.all(
     [
       { name: "Chidinma Okafor", phone: "+234 803 555 0192", email: "chidinma@example.com" },

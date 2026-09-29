@@ -79,6 +79,11 @@ SEED_OWNER_PASSWORD=change-me-to-something-strong
 Then open <http://localhost:3000> and sign in as `SEED_OWNER_EMAIL`, or create a
 different business at `/signup`.
 
+The seed creates the business and its owner and **no** receipts or customers —
+a real install should not open on a ledger of invented sales. Set
+`SEED_SAMPLE_DATA=true` in `.env` when you deliberately want throwaway rows to
+exercise the dashboard, filters and PDF rendering.
+
 > No system PostgreSQL is needed: `npm run db:start` runs real PostgreSQL from
 > a project-local data directory (`apps/api/.pgdata`) with a UTF-8 cluster.
 > Delete that folder to start from scratch, then run `db:start` + `db:setup`.
