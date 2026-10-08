@@ -49,10 +49,16 @@ function int(name: string, fallback: number): number {
 /**
  * The public origin the hosting platform thinks we live on, if it tells us.
  *
- * Render sets `RENDER_EXTERNAL_URL` (e.g. `https://myapp.onrender.com`) at both
- * build and run time. Reading it here means share links and CORS are correct
- * the moment the service is deployed, with nothing to hard-code when the URL
- * changes — `PUBLIC_API_BASE_URL` / `API_ORIGIN` still win when set explicitly.
+ * Render sets `RENDER_EXTERNAL_URL` (e.g. `https://eleosstyles.onrender.com`)
+ * at both build and run time. Reading it here means share links and CORS are
+ * correct the moment the service is deployed, with nothing to hard-code when
+ * the URL changes — `PUBLIC_API_BASE_URL` / `API_ORIGIN` still win when set
+ * explicitly.
+ *
+ * With no platform URL the CORS allowlist is deliberately empty: the API is a
+ * backend with no browser client of its own, so nothing should be trusted until
+ * the deployment says who it is. Requests without an Origin header (curl,
+ * server-to-server, PDF fetchers) are unaffected — see the check in app.ts.
  */
 const platformUrl = optional("RENDER_EXTERNAL_URL", "");
 
@@ -71,8 +77,14 @@ export const env = {
   isProd: NODE_ENV === "production",
   isTest: NODE_ENV === "test",
 
-  port: int("API_PORT", 4000),
-  origins: optional("API_ORIGIN", platformUrl || "http://localhost:3000")
+  /**
+   * The API is the only listener, so it has to answer on whatever port the
+   * platform assigns. Render (and most PaaS providers) set `PORT`; `API_PORT`
+   * still wins when set explicitly, which is how docker-compose and the local
+   * dev server keep 4000.
+   */
+  port: int("API_PORT", int("PORT", 4000)),
+  origins: optional("API_ORIGIN", platformUrl)
     .split(",")
     .map((o) => o.trim())
     .filter(Boolean),

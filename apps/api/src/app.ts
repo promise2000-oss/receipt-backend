@@ -25,7 +25,7 @@ import { createDocsRouter, DOCS_PATH } from "./openapi";
 export function createApp(): Express {
   const app = express();
 
-  // Behind the Next.js proxy in production; also correct for local dev.
+  // Behind Render's router (and any reverse proxy) in production.
   app.set("trust proxy", 1);
   if (!env.isProd) app.set("json spaces", 2);
 
@@ -42,7 +42,8 @@ export function createApp(): Express {
   app.use(
     cors({
       origin: (origin, callback) => {
-        // Same-origin (Next proxy) requests carry no Origin header.
+        // Non-browser clients (curl, server-to-server, PDF fetchers) send no
+        // Origin header. Only a browser origin has to be on the allowlist.
         if (!origin) return callback(null, true);
         callback(null, env.origins.includes(origin));
       },

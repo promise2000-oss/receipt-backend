@@ -12,7 +12,6 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 COPY packages/shared/package.json packages/shared/
 COPY apps/api/package.json apps/api/
-COPY apps/web/package.json apps/web/
 
 # Puppeteer downloads its matching Chrome for Testing while `npm ci` runs; the
 # path has to be pinned here so the runtime stage's COPY finds it (the default

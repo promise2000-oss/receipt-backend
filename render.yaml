@@ -2,18 +2,18 @@
 #
 # Render reads this file and creates the whole deployment:
 #
-#   * one web service, built from ./Dockerfile (Next.js + API in one container)
+#   * one web service, built from ./Dockerfile (the Express API)
 #   * one managed PostgreSQL 17 database
 #
 # Setup:
 #   1. Push this repo to GitHub — see AGENTS.md, `.playwright-mcp/` must never
 #      be committed (it is gitignored).
 #   2. Render dashboard → New → Blueprint → select the repo.
-#   3. Open https://eleosstyles-receipts.onrender.com and sign up.
+#   3. Browse https://eleosstyles.onrender.com/api/docs to explore the API.
 #
-# Why one service? The browser only ever talks to Next.js, which rewrites
-# /api/* to the Express API on :4000 *inside the container*. That keeps the
-# session cookie same-origin (no CORS), and it is how the app runs locally.
+# Why one service? The API is the entire product: JSON under /api, the
+# standalone receipt pages behind share links, PDF generation, and Swagger UI
+# at /api/docs. Nothing else needs to serve traffic.
 #
 # ---------------------------------------------------------------------------
 # FREE TIER — what you are signing up for (docs.render.com/free)
@@ -49,8 +49,7 @@ services:
     # `free` = 0.1 CPU / 512 MB. Disks are unavailable at this tier, which is
     # why there is no `disk:` block in the active config.
     plan: free
-    # Probes GET /api/health through the Next.js proxy on the public port, so
-    # a deploy is only marked live once both processes answer.
+    # Probes GET /api/health on the public port.
     healthCheckPath: /api/health
     # Migrations run in the container's CMD, and each instance would run them
     # on boot — stay at one instance unless you move them to preDeployCommand.
@@ -72,9 +71,6 @@ services:
         generateValue: true
       - key: NODE_ENV
         value: production
-      # Next.js proxies /api/* here. Private to the container.
-      - key: API_INTERNAL_URL
-        value: http://localhost:4000
       # Ephemeral on the free plan: re-deploys and spin-downs erase this
       # directory. Switch to S3 for durability:
       #   STORAGE_DRIVER=s3

@@ -1,12 +1,20 @@
 # Eleosstyles Receipt System
 
-Create, brand, send and track sales receipts: a boutique receipt tool for a
-single business — customers, a guided receipt builder, a branded PDF, expiry
-protected sharing links, history with void/reissue, and a dashboard.
+Create, brand, send and track sales receipts: a boutique receipt API for a
+single business — customers, receipts, branded PDFs, expiry-protected sharing
+links, history with void/reissue, and dashboard figures.
 
-**Cream page · black header · gold accents** — the same palette is used by the
-on-screen UI *and* the server-rendered receipt, so the PDF never drifts from
-what you saw in the preview.
+This is a **backend only**. There is no browser UI to deploy or maintain. The
+API is the whole product, and it serves everything a client needs:
+
+- JSON under `/api`
+- **Standalone receipt pages** behind every share link — real HTML, branded, printable
+- Generated PDFs
+- **Swagger UI** at `/api/docs` for exploring and calling the API
+
+**Cream page · black header · gold accents** — the same HTML template backs both
+the share-link page and the PDF, so a customer viewing a link and a customer
+holding the printout see an identical document.
 
 ---
 
@@ -31,26 +39,25 @@ what you saw in the preview.
 
 ## Features
 
-| # | Feature | Where |
-|---|---------|-------|
-| 1 | Email + password sign-in, JWT in an `httpOnly` cookie, sign-up creates business + owner atomically | `/login`, `/signup` |
-| 2 | Business settings: name, contact details, logo upload, brand colours with presets, currency, receipt number prefix | `/settings` |
-| 3 | Customers: create, edit, search, delete, receipts-per-customer count | `/customers` |
-| 4 | Receipt builder: dynamic line items, live totals, per-business sequential numbers (`ES-0000214`), live preview | `/receipts/new` |
+| # | Feature | Endpoint |
+|---|---------|----------|
+| 1 | Email + password sign-in, JWT in an `httpOnly` cookie, sign-up creates business + owner atomically | `POST /api/auth/login` · `/signup` |
+| 2 | Business settings: name, contact details, logo upload, brand colours, currency, receipt number prefix | `GET`/`PATCH /api/business` · `/logo` |
+| 3 | Customers: create, edit, search, delete, receipts-per-customer count | `/api/customers` |
+| 4 | Receipts with line items and per-business gap-free sequential numbers (`ES-0000214`); totals computed server-side | `POST /api/receipts` |
 | 5 | Branded PDF: black header band + logo, cream body, itemised table, gold total row, gold frame, footer disclaimer | `GET /api/receipts/:id/pdf` |
-| 6 | Share: expiring signed link, WhatsApp (`wa.me`), email with the PDF attached, download | `/receipts/:id` |
-| 7 | History: search + status/period filters, Paid = gold pill, Pending = grey outline, Void = strikethrough | `/receipts` |
-| 8 | Void + reissue: voided receipts are retained and marked, reissue creates a linked replacement with a fresh number | `/receipts/:id` |
-| 9 | Dashboard: Today / This Week / This Month cards + recent receipts table | `/dashboard` |
+| 6 | Share: expiring signed link to a standalone receipt page, plus PDF download | `GET /api/public/r/:token/document` · `/download` |
+| 7 | History: search + status/period/amount filters | `GET /api/receipts` |
+| 8 | Void + reissue: voided receipts are retained and marked, reissue creates a linked replacement with a fresh number | `POST /api/receipts/:id/void` · `/reissue` |
+| 9 | Dashboard figures: Today / This Week / This Month + recent receipts | `GET /api/dashboard/summary` |
 
 ## Stack
 
-- **Web** — Next.js 16 (App Router), React 19, TypeScript, Tailwind CSS 4
 - **API** — Node.js, Express 5, Zod v4 validation, Prisma 6 → PostgreSQL 17
-- **PDF** — one HTML template rendered on screen and fed to Puppeteer
+- **Documents** — one HTML template for share pages, fed to Puppeteer for PDFs
 - **Storage** — private disk by default (`LocalDiskStorage`), S3-compatible driver behind env vars
 - **Mail** — console transport by default, SMTP in production
-- **Monorepo** — npm workspaces: `apps/api`, `apps/web`, `packages/shared`
+- **Monorepo** — npm workspaces: `apps/api`, `packages/shared`
 
 ## Quick start (local)
 
@@ -64,8 +71,8 @@ cp .env.example .env
 node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"
 
 npm run db:start     # terminal 1 — embedded PostgreSQL 17 on :5433, leave it running
-npm run db:setup     # terminal 2 — creates the databases, migrates, seeds sample data
-npm run dev          # terminal 2 — API on :4000, web on :3000
+npm run db:setup     # terminal 2 — creates the databases, migrates, seeds the business
+npm run dev          # terminal 2 — API on :4000
 ```
 
 The seed creates one business and one owner login, and it needs your own
@@ -76,13 +83,18 @@ SEED_OWNER_EMAIL=you@yourdomain.com
 SEED_OWNER_PASSWORD=change-me-to-something-strong
 ```
 
-Then open <http://localhost:3000> and sign in as `SEED_OWNER_EMAIL`, or create a
-different business at `/signup`.
-
 The seed creates the business and its owner and **no** receipts or customers —
 a real install should not open on a ledger of invented sales. Set
 `SEED_SAMPLE_DATA=true` in `.env` when you deliberately want throwaway rows to
-exercise the dashboard, filters and PDF rendering.
+exercise the filters and PDF rendering.
+
+Then browse the API:
+
+| URL | What |
+|-----|------|
+| <http://localhost:4000/api/health> | Liveness check |
+| <http://localhost:4000/api/docs> | Swagger UI — sign in at *Authorize* to call protected endpoints |
+| `GET /api/docs/openapi.json` | The raw OpenAPI 3.1 document, for codegen or linting |
 
 > No system PostgreSQL is needed: `npm run db:start` runs real PostgreSQL from
 > a project-local data directory (`apps/api/.pgdata`) with a UTF-8 cluster.
@@ -94,15 +106,15 @@ Run from the repository root:
 
 | Script | What it does |
 |--------|--------------|
-| `npm run dev` | Build the shared package, then run API + web in watch mode |
-| `npm run build` | Production build: shared → API (`tsc`) → web (`next build`) |
-| `npm start` | Run the production build (`dist/index.js` + `next start`) |
+| `npm run dev` | Build the shared package, then run the API in watch mode |
+| `npm run build` | Production build: shared → API (`tsc`) |
+| `npm start` | Run the production build (`dist/index.js`) |
 | `npm test` | API test suite (business rules, tenancy, auth, numbering…) |
 | `npm run typecheck` | Type-check every workspace, including the tests |
 | `npm run db:start` | Start the embedded PostgreSQL (foreground, leave running) |
 | `npm run db:setup` | Create databases if missing, apply migrations, seed |
 | `npm run db:migrate` | `prisma migrate dev` (create/apply migrations interactively) |
-| `npm run db:seed` | Seed the demo tenant (idempotent) |
+| `npm run db:seed` | Seed the business and owner (idempotent) |
 | `npm run db:reset` | Drop, recreate and re-migrate the database, then seed |
 
 ## Configuration
@@ -114,8 +126,8 @@ commented list). The important ones:
 |----------|-------|
 | `JWT_SECRET` | **Required**, ≥ 32 chars. Signs session cookies *and* share links. |
 | `DATABASE_URL` | `postgresql://user:pass@host:port/dbname` |
-| `API_ORIGIN` | CORS allowlist (comma separated). The browser normally goes through the Next proxy, so same-origin requests skip CORS entirely. |
-| `API_INTERNAL_URL` | Where Next.js proxies `/api/*` to. `http://localhost:4000` locally, `http://api:4000` in Docker. |
+| `API_ORIGIN` | CORS allowlist for browser clients (comma separated). Only needed if a browser app calls the API from another origin — requests with no `Origin` header (curl, server-to-server) are never checked. Defaults to `RENDER_EXTERNAL_URL` when set, otherwise empty, which rejects every browser origin. |
+| `PORT` / `API_PORT` | Listen port. `PORT` is what PaaS providers set; `API_PORT` wins when set explicitly and defaults to 4000. |
 | `PUBLIC_API_BASE_URL` | Public origin for share links when a proxy rewrites `Host`. Leave empty to derive it from the request. |
 | `STORAGE_DRIVER` | `local` (default, files under `apps/api/.storage`) or `s3` |
 | `MAIL_DRIVER` | `console` (default, logs mail) or `smtp` |
@@ -131,9 +143,8 @@ npm run build
 NODE_ENV=production JWT_SECRET=... DATABASE_URL=... npm start
 ```
 
-`npm start` runs the compiled API (`apps/api/dist/index.js`) and `next start`.
-The web server rewrites `/api/:path*` to `API_INTERNAL_URL`, so the browser
-keeps a single origin and the session cookie stays first-party.
+`npm start` runs the compiled API (`apps/api/dist/index.js`), which listens on
+`API_PORT` (4000 by default, or `PORT` when the platform sets it).
 
 Terminate TLS in front of the app (nginx, Caddy, a load balancer) and make sure
 `x-forwarded-proto`/`x-forwarded-host` are set — share links and signed URLs
@@ -142,21 +153,16 @@ are built from them.
 ## Docker (managed PostgreSQL)
 
 This is the non-embedded-Postgres path: an official `postgres:17` service plus
-API and web containers.
+the API.
 
 ```bash
 cp .env.example .env        # set JWT_SECRET
 docker compose up --build
-docker compose exec api npx prisma db seed   # optional demo tenant
+docker compose exec api npm run db:seed   # create the business and owner
 ```
 
-Then open <http://localhost:3000>. Only the web container is published; the
-browser never talks to the API directly. Uploaded logos and generated PDFs live
-in the `storage` volume, the database in `pgdata`.
-
-> `API_INTERNAL_URL` is baked into Next.js's route manifest at **build** time,
-> which is why it is passed as a build arg — change it there if your service
-> names differ.
+Then browse <http://localhost:4000/api/docs>. Uploaded logos and generated PDFs
+live in the `storage` volume, the database in `pgdata`.
 
 ## Deploy (Render)
 
@@ -172,12 +178,11 @@ pick the repository. It creates:
 No disk: free services don't support them, so uploads live in the container's
 filesystem (see the caveats below).
 
-**One service, one container.** The image runs Next.js on `$PORT` (public,
-10000 on Render) and the API on `:4000`, which is never published — the browser
-only talks to Next.js, which rewrites `/api/*` to it. That is exactly the
-arrangement used in development, so cookies, CORS and share links behave
-identically. On boot the container runs `prisma migrate deploy` first and only
-then starts both processes, so nothing serves against a stale schema.
+**One service, one container.** The API is the only process, and it listens on
+`$PORT` (public, 10000 on Render). On boot the container runs
+`prisma migrate deploy` first and only then starts the server, so nothing serves
+against a stale schema. `PID 1` is node itself, so Render's SIGTERM reaches the
+graceful shutdown in `index.ts` instead of being swallowed by an npm wrapper.
 
 ### Free-tier caveats
 
@@ -240,23 +245,25 @@ asserts the rules the product depends on:
 ## Architecture
 
 ```
-browser ──► Next.js (:3000) ── rewrite /api/* ──► Express (:4000) ──► Prisma ──► PostgreSQL
+client ──► Express (:4000) ──► Prisma ──► PostgreSQL
                                                                      │
                                                      Puppeteer ──────┤ (PDF)
                                                      LocalDisk / S3 ─┘ (files)
 ```
 
 - **`packages/shared`** holds the Zod schemas, money maths (`computeTotals`),
-  enums and DTO types used by both sides — the API validates with exactly the
-  schema the form was built against.
+  enums and DTO types. The API validates against these, and the OpenAPI request
+  bodies are generated from them, so the published contract cannot drift from
+  the validation actually performed.
 - **Session** — `POST /api/auth/login` returns a JWT in an `httpOnly`,
   `SameSite=Lax` cookie. Nothing is kept in `localStorage`.
 - **Tenancy** — a Prisma client extension refuses any write to `user`,
   `customer` or `receipt` that does not carry a `business_id`; reads always
   filter by the session's business.
-- **Receipt documents** — `renderReceiptHtml()` is the single template for the
-  on-screen preview, the live preview iframe (`POST /api/receipts/preview`) and
-  the PDF, so all three are identical by construction.
+- **Receipt documents** — `renderReceiptHtml()` is the single template behind
+  the share-link page (`GET /api/public/r/:token/document`), the owner's preview
+  (`POST /api/receipts/preview`) and the PDF, so all three are identical by
+  construction.
 - **Storage** — files are written under a private prefix and only reachable
   through `GET /api/files/:token`, an HMAC-signed expiring URL. The S3 driver
   swaps in presigned URLs without touching routes.
@@ -310,7 +317,7 @@ the session cookie.
 | GET | `/docs` · `/docs/openapi.json` | Swagger UI · raw OpenAPI 3.1 document |
 | GET | `/health` | Liveness |
 
-Errors are always `{ message, code, details? }` with an HTTP status, so the UI
+Errors are always `{ message, code, details? }` with an HTTP status, so a client
 can render field-level messages.
 
 ## API documentation
@@ -319,9 +326,14 @@ Interactive **Swagger UI** is served by the API itself:
 
 | URL | What |
 |-----|------|
-| <http://localhost:3000/api/docs> | Through the app — same origin, so the browser sends the session cookie and *Try it out* works immediately (sign in at `/login` first). |
-| <http://localhost:4000/api/docs> | Straight against the API during development. |
+| `GET /api/docs` | The interactive UI. Sign in with *Authorize* first, then *Try it out* sends your session cookie. |
 | `GET /api/docs/openapi.json` | The raw OpenAPI 3.1 document, for codegen or linting. |
+
+Set `DOCS_ENABLED=false` to take the documentation down — worth doing on a public
+deployment. `tests/docs.test.ts` keeps it honest: every `$ref` resolves, operation
+ids are unique, parameters match their paths, and **every documented endpoint
+really is routed** by Express (a route rename that leaves the docs behind fails
+the suite).
 
 The document lives in `apps/api/src/openapi/`:
 
@@ -351,18 +363,18 @@ apps/
     src/routes/ auth, business, customers, receipts, dashboard, public, files
     prisma/     schema, migrations, seed
     tests/      vitest business-rule + documentation suites
-  web/          Next.js app
-    src/app/    login, signup, dashboard, receipts, customers, settings, r/[token]
-    src/lib/    api client, session, ui helpers
 packages/
   shared/       Zod schemas, money maths, enums, DTO types
-docker-compose.yml
+Dockerfile          single-container image (API + Chromium) for Render
+render.yaml         Render Blueprint: one web service + managed Postgres
+docker-compose.yml  local Postgres + API
 ```
 
 ---
 
 ### Design reference
 
-The layout follows the written specification (cream `#FBF7EE`, ink `#111111`,
-gold `#B8912F` / `#D9B45C`, Inter/Manrope UI type, Playfair Display reserved
-for the wordmark, thin gold rules, 8–12px radii, no heavy shadows).
+The receipt document follows the written specification (cream `#FBF7EE`, ink
+`#111111`, gold `#B8912F` / `#D9B45C`, Playfair Display for the wordmark, thin
+gold rules, 8–12px radii, no heavy shadows). The two brand colours are per
+business, so a tenant's own palette replaces the defaults.

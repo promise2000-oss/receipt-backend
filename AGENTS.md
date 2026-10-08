@@ -46,19 +46,21 @@ same as committing it.
 
 | Path | What |
 |------|------|
-| `apps/api` | Express 5 + Prisma + Puppeteer (`src/routes`, `src/lib`, `src/openapi`) |
-| `apps/web` | Next.js 16 App Router UI |
-| `packages/shared` | Zod schemas, money maths, enums, DTO types — the contract both sides share |
+| `apps/api` | Express 5 + Prisma + Puppeteer (`src/routes`, `src/lib`, `src/openapi`) — the whole product |
+| `packages/shared` | Zod schemas, money maths, enums, DTO types |
 | `render.yaml` | Render Blueprint: one web service (Docker) + managed Postgres + disk |
-| `Dockerfile` | Single-container image for Render (API + web in one service) |
-| `apps/api/Dockerfile`, `apps/web/Dockerfile` | Split images used by `docker-compose.yml` |
+| `Dockerfile` | Single-container image for Render (the API + Chromium) |
+| `apps/api/Dockerfile` | The image `docker-compose.yml` builds |
+
+There is no frontend. The API serves the JSON, the standalone receipt pages
+behind share links, the PDFs and Swagger UI at `/api/docs`.
 
 ## Commands
 
 ```bash
 npm run typecheck   # all workspaces, including tests
 npm test            # API suite — needs the database from `npm run db:start`
-npm run build       # shared → api (tsc) → web (next build)
+npm run build       # shared → api (tsc)
 ```
 
 ## Rules the code is built on
@@ -72,8 +74,10 @@ npm run build       # shared → api (tsc) → web (next build)
 
 ## Deployment notes (Render)
 
-- One web service, one container: Next.js on `$PORT` (public), Express on
-  `:4000` (private to the container). The browser only talks to Next.js.
+- One web service, one container: the Express API is the only process and
+  listens on `$PORT` (`API_PORT` wins when set explicitly, otherwise `PORT`
+  falls back to 4000). `PID 1` is node, so SIGTERM reaches the graceful
+  shutdown in `index.ts`.
 - **Blueprint is configured for the `free` tier**: no disk (free services
   cannot have one), so `STORAGE_DIR` is ephemeral — re-deploys and the
   15-minute spin-down delete uploaded logos and PDFs. Moving off `free`

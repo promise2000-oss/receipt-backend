@@ -441,7 +441,7 @@ receiptRouter.post(
 
     res.json({
       token,
-      url: absoluteUrl(req, `/r/${token}`),
+      url: absoluteUrl(req, `/api/public/r/${token}/document`),
       expires_at: expiresAt.toISOString(),
     });
   }),
@@ -456,7 +456,7 @@ receiptRouter.post(
     const business = await loadBusinessFor(businessId);
 
     const { token, expiresAt } = signShareToken(receipt.id);
-    const viewUrl = absoluteUrl(req, `/r/${token}`);
+    const viewUrl = absoluteUrl(req, `/api/public/r/${token}/document`);
 
     // Attach the branded PDF so the recipient gets the document itself.
     const { buffer } = await ensurePdf(receipt, businessId);
@@ -502,7 +502,7 @@ receiptRouter.get(
     const { token, expiresAt } = signShareToken(receipt.id, ttl);
     res.json({
       token,
-      url: absoluteUrl(req, `/r/${token}`),
+      url: absoluteUrl(req, `/api/public/r/${token}/document`),
       expires_at: expiresAt.toISOString(),
     });
   }),

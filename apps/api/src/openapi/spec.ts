@@ -119,7 +119,7 @@ export const openApiSpec: Json = {
     ].join("\n"),
   },
   servers: [
-    { url: "/api", description: "This origin (proxied through Next.js in dev)" },
+    { url: "/api", description: "This origin" },
     { url: "http://localhost:4000/api", description: "Direct API, local development" },
   ],
   tags: [
@@ -662,8 +662,10 @@ export const openApiSpec: Json = {
         operationId: "getPublicReceipt",
         summary: "Public receipt payload",
         description:
-          "Powers the no-login receipt page. Tenancy metadata is stripped: no " +
-          "`business_id`, no internal ids beyond the receipt's own.",
+          "The receipt behind a share link, as JSON. Tenancy metadata is stripped: " +
+          "no `business_id`, no internal ids beyond the receipt's own. The link " +
+          "given to customers resolves to `/document` instead, which returns the " +
+          "same receipt as a standalone printable page.",
         public: true,
         parameters: [tokenParam()],
         responses: [

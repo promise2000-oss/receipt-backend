@@ -316,7 +316,7 @@ export const responseSchemas: Record<string, Json> = {
     ],
   ),
 
-  /** Payload served to the no-login receipt page at `/r/[token]`. */
+  /** Payload behind a share link: the JSON for the receipt, the branding and the expiry. */
   PublicReceiptPage: obj(
     {
       receipt: ref("PublicReceipt"),

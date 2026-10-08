@@ -6,10 +6,9 @@
 #
 #   cp .env.example .env      # then set a strong JWT_SECRET
 #   docker compose up --build
-#   docker compose exec api npx prisma db seed      # optional demo tenant
 #
-# Open http://localhost:3000 — the browser only ever talks to the Next.js
-# server, which proxies /api/* to the API container (same-origin cookies).
+# The API is the whole product: it serves the JSON under /api, the standalone
+# receipt pages behind share links, PDFs, and Swagger UI at /api/docs.
 # ---------------------------------------------------------------------------
 
 services:
@@ -44,30 +43,20 @@ services:
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
       JWT_TTL_SECONDS: "604800"
       SHARE_TTL_SECONDS: "604800"
-      # Browser-facing origin (through the Next.js proxy) — CORS allowlist.
-      API_ORIGIN: http://localhost:3000
+      # CORS allowlist for browser clients calling the API directly. Requests
+      # with no Origin header (curl, server-to-server, PDF fetchers) are allowed
+      # through; only real browser origins are checked.
+      API_ORIGIN: ${API_ORIGIN:-https://localhost:3000}
       # Private PDF/logo storage; the volume survives container restarts.
       STORAGE_DRIVER: local
       STORAGE_DIR: /data/storage
       # console = log mails instead of sending them. Set MAIL_DRIVER=smtp and
       # SMTP_* to deliver for real.
       MAIL_DRIVER: console
+    ports:
+      - "4000:4000"
     volumes:
       - storage:/data/storage
-    restart: unless-stopped
-
-  web:
-    build:
-      context: .
-      dockerfile: apps/web/Dockerfile
-      args:
-        API_INTERNAL_URL: http://api:4000
-    depends_on:
-      - api
-    environment:
-      API_INTERNAL_URL: http://api:4000
-    ports:
-      - "3000:3000"
     restart: unless-stopped
 
 volumes:

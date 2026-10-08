@@ -1,13 +1,12 @@
-# Eleosstyles Receipt System — single-service image
+# Eleosstyles Receipt System — API image
 #
-# One container runs the whole product, which is what Render (and any host
-# that hands you a single public port) expects:
+# The product is a backend: an Express API on PostgreSQL that renders and prints
+# receipts. There is no separate frontend service.
 #
-#   * Next.js      → $PORT (10000 on Render)  ← the only public listener
-#   * Express API  → :4000, private to the container
+#   * Express API  → $PORT (10000 on Render)  ← the only public listener
 #
-# The browser only ever talks to Next.js, which rewrites /api/* to the API, so
-# the session cookie stays first-party — exactly as it does in development.
+# Everything the browser needs is served from here: the JSON API under /api, the
+# standalone receipt pages behind share links, PDFs, and Swagger UI at /api/docs.
 #
 #   docker build -t eleosstyles .
 #   docker run -p 10000:10000 \
@@ -22,7 +21,6 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 COPY packages/shared/package.json packages/shared/
 COPY apps/api/package.json apps/api/
-COPY apps/web/package.json apps/web/
 
 # Puppeteer downloads its matching Chrome for Testing while `npm ci` runs, and
 # the cache path must be pinned *here*: the default is $HOME/.cache, which the
@@ -48,18 +46,10 @@ RUN npm ci \
 COPY tsconfig.base.json ./
 COPY packages/shared packages/shared
 COPY apps/api apps/api
-COPY apps/web apps/web
-
-# Next.js bakes the rewrite target into .next/routes-manifest.json, so the API
-# address has to be known before `next build` runs.
-ARG API_INTERNAL_URL=http://localhost:4000
-ENV API_INTERNAL_URL=$API_INTERNAL_URL \
-    NEXT_TELEMETRY_DISABLED=1
 
 RUN npm run build:shared \
  && npx prisma generate --schema apps/api/prisma/schema.prisma \
- && npm run build --workspace @eleos/api \
- && npm run build --workspace @eleos/web
+ && npm run build --workspace @eleos/api
 
 # ---------------------------------------------------------------------------
 FROM node:22-bookworm-slim AS runtime
@@ -95,22 +85,18 @@ RUN apt-get update \
       xdg-utils \
  && rm -rf /var/lib/apt/lists/*
 
-# PORT is what Next.js binds to (Render overwrites it with the service's port);
-# the API stays on API_PORT, which is never published.
+# PORT is the public listener; Render overwrites it with the service's port.
 ENV NODE_ENV=production \
     PORT=10000 \
-    API_PORT=4000 \
-    API_INTERNAL_URL=http://localhost:4000 \
+    API_PORT=10000 \
     STORAGE_DIR=/data/storage \
-    PUPPETEER_CACHE_DIR=/app/.cache/puppeteer \
-    NEXT_TELEMETRY_DISABLED=1
+    PUPPETEER_CACHE_DIR=/app/.cache/puppeteer
 
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/package.json ./package.json
 COPY --from=build /app/package-lock.json ./package-lock.json
 COPY --from=build /app/packages/shared ./packages/shared
 COPY --from=build /app/apps/api ./apps/api
-COPY --from=build /app/apps/web ./apps/web
 # Chrome for Testing, fetched during `npm ci` above.
 COPY --from=build /app/.cache/puppeteer ./.cache/puppeteer
 
@@ -134,7 +120,10 @@ RUN if ls -d "$PUPPETEER_CACHE_DIR"/chrome/*/*/chrome >/dev/null 2>&1; then \
 # The persistent disk mounts here; seed it so a fresh volume is never empty.
 RUN mkdir -p /data/storage
 
+EXPOSE 10000
+
 # Migrate first — idempotent, and nothing serves until the schema is current.
-# `exec` hands PID 1 to concurrently, which forwards SIGTERM to both children,
-# so Render's shutdown is graceful instead of a 30s wait for SIGKILL.
-CMD npm run db:deploy && exec node_modules/.bin/concurrently --kill-others -n api,web -c black,blue "npm:start:api" "npm:start:web"
+# `exec` replaces the shell so PID 1 *is* node: npm would add a process layer
+# that swallows SIGTERM, and Render would SIGKILL after 30s instead of letting
+# index.ts close the browser and the Prisma pool.
+CMD npm run db:deploy && exec node apps/api/dist/index.js

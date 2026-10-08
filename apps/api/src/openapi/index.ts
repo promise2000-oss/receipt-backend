@@ -32,11 +32,9 @@ const uiOptions: SwaggerUiOptions = {
  * `swagger-ui-init.js` by `generateHTML`, so there is no second round trip.
  *
  * The stock page links its assets relatively (`./swagger-ui.css`), which only
- * resolves when the page URL itself ends in a slash. Next.js answers a
- * trailing-slash request with `308 → /api/docs` while `express.static` answers
- * `/api/docs` with `301 → /api/docs/`, so a relative link would bounce the two
- * URLs off each other forever behind the proxy. Absolute hrefs sidestep that:
- * the page works from either URL, direct or proxied.
+ * resolves when the page URL itself ends in a slash. Absolute hrefs sidestep
+ * that entirely: the page works from `/api/docs` and `/api/docs/` alike,
+ * whichever URL the caller or a link happens to use.
  */
 const page = swaggerUi
   .generateHTML(openApiSpec as swaggerUi.JsonObject, uiOptions)

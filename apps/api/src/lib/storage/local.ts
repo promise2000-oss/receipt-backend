@@ -24,6 +24,14 @@ function contentTypeFor(key: string): string {
  * Files live under `apps/api/.storage` and are only reachable through
  * `GET /api/files/<signed token>`, which verifies an HMAC and an expiry
  * before streaming a single byte.
+ *
+ * The root is resolved from the process cwd, never from `__dirname`. This code
+ * runs from `src/lib/storage` under `tsx` in development and from
+ * `dist/lib/storage` once compiled, so an `__dirname`-relative root pointed at
+ * a *different* directory in each mode — a logo uploaded during development sat
+ * in `src/.storage` where the built server could not see it, and every receipt
+ * silently fell back to the letter monogram. Both entrypoints run with
+ * `apps/api` as their cwd, so this resolves to one stable folder.
  */
 export class LocalDiskStorage implements Storage {
   readonly driver = "local" as const;
@@ -33,7 +41,7 @@ export class LocalDiskStorage implements Storage {
     this.root =
       root && root.trim().length > 0
         ? path.resolve(root)
-        : path.resolve(__dirname, "../../.storage");
+        : path.resolve(process.cwd(), ".storage");
   }
 
   private resolve(key: string): string {

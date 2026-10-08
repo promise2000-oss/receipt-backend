@@ -15,18 +15,15 @@
     "db:deploy": "npm run db:deploy --workspace @eleos/api",
     "db:seed": "npm run db:seed --workspace @eleos/api",
     "db:reset": "npm run db:reset --workspace @eleos/api",
-    "dev": "npm run build:shared && concurrently -n api,web -c black,blue \"npm:dev:api\" \"npm:dev:web\"",
+    "dev": "npm run build:shared && npm run dev:api",
     "dev:api": "npm run dev --workspace @eleos/api",
-    "dev:web": "npm run dev --workspace @eleos/web",
-    "build": "npm run build:shared && npm run build --workspace @eleos/api && npm run build --workspace @eleos/web",
-    "start": "concurrently -n api,web -c black,blue \"npm:start:api\" \"npm:start:web\"",
+    "build": "npm run build:shared && npm run build --workspace @eleos/api",
+    "start": "npm run start:api",
     "start:api": "npm run start --workspace @eleos/api",
-    "start:web": "npm run start --workspace @eleos/web",
     "test": "npm run test --workspace @eleos/api",
     "typecheck": "npm run typecheck --workspaces --if-present"
   },
   "devDependencies": {
-    "concurrently": "^10.0.5",
     "typescript": "^5.9.3"
   },
   "engines": {
