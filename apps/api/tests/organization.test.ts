@@ -1,5 +1,6 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import request from "supertest";
+import zlib from "node:zlib";
 import bcrypt from "bcryptjs";
 import type { Express } from "express";
 import { createApp } from "../src/app";
@@ -419,5 +420,131 @@ describe("brute-force budget", () => {
 
     expect(seen.has(429)).toBe(true);
     expect(seen.has(401)).toBe(true);
+  });
+});
+
+describe("logo dimensions", () => {
+  /**
+   * A genuinely decodable PNG — raw scanlines, deflated, with real CRCs — so
+   * these assertions are about the guard rather than about whether the bytes
+   * merely *look* like a PNG header.
+   */
+  const CRC_TABLE = (() => {
+    const table = new Uint32Array(256);
+    for (let n = 0; n < 256; n += 1) {
+      let c = n;
+      for (let k = 0; k < 8; k += 1) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+      table[n] = c;
+    }
+    return table;
+  })();
+
+  function crc32(buffer: Buffer): number {
+    let crc = 0xffffffff;
+    for (const byte of buffer) crc = CRC_TABLE[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+    return (crc ^ 0xffffffff) >>> 0;
+  }
+
+  function chunk(type: string, data: Buffer): Buffer {
+    const out = Buffer.alloc(12 + data.length);
+    out.writeUInt32BE(data.length, 0);
+    out.write(type, 4, "ascii");
+    data.copy(out, 8);
+    out.writeUInt32BE(crc32(out.subarray(4, 8 + data.length)), 8 + data.length);
+    return out;
+  }
+
+  function realPng(size: number): Buffer {
+    const header = Buffer.alloc(13);
+    header.writeUInt32BE(size, 0);
+    header.writeUInt32BE(size, 4);
+    header[8] = 8; // bit depth
+    header[9] = 2; // colour type: truecolour
+    const raw = Buffer.alloc((size * 3 + 1) * size); // filter byte 0, black pixels
+    return Buffer.concat([
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      chunk("IHDR", header),
+      chunk("IDAT", zlib.deflateSync(raw)),
+      chunk("IEND", Buffer.alloc(0)),
+    ]);
+  }
+
+  async function uploadLogo(tenant: Tenant, body: Buffer, filename: string) {
+    return request(app)
+      .post("/api/business/logo")
+      .set("Cookie", tenant.cookie)
+      .attach("logo", body, filename);
+  }
+
+  /**
+   * The key as stored, read from the database.
+   *
+   * Comparing `logo_url` is a trap: it is signed per request with an issue
+   * timestamp, so two reads of an unchanged logo produce different strings.
+   * The key underneath is the thing that must not change.
+   */
+  async function storedLogoKey(): Promise<string | null> {
+    const row = await prisma.business.findFirst({
+      where: { id: tenantA.businessId },
+      select: { logo_url: true },
+    });
+    return row?.logo_url ?? null;
+  }
+
+  it("stores a logo whose size is inside the allowed window", async () => {
+    const before = await storedLogoKey();
+
+    const accepted = await uploadLogo(tenantA, realPng(512), "brand.png");
+    expect(accepted.status, JSON.stringify(accepted.body)).toBe(200);
+    expect(accepted.body.logo_url).toContain("/api/files/");
+
+    const stored = await storedLogoKey();
+    expect(stored).toBeTruthy();
+    expect(stored).not.toBe(before); // replaced (or set for the first time)
+    expect(stored).toContain("brand.png");
+  });
+
+  it("refuses a logo too small to reproduce on a receipt", async () => {
+    const previous = await storedLogoKey();
+    expect(previous).toBeTruthy();
+
+    const rejected = await uploadLogo(tenantA, realPng(8), "tiny.png");
+    expect(rejected.status).toBe(422);
+    expect(rejected.body.code).toBe("IMAGE_TOO_SMALL");
+
+    // Nothing was written: the previously stored logo is still the one in use.
+    expect(await storedLogoKey()).toBe(previous);
+  });
+
+  it("refuses a logo large enough to be expensive to decode", async () => {
+    // Header only: the guard reads the size, never the pixels, and producing
+    // 8193² of real pixel data would be exactly the waste we are avoiding.
+    const header = Buffer.alloc(33);
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(header, 0);
+    header.writeUInt32BE(13, 8);
+    header.write("IHDR", 12, "ascii");
+    header.writeUInt32BE(9000, 16);
+    header.writeUInt32BE(9000, 20);
+    header.write("IDAT", 28, "ascii");
+
+    const rejected = await uploadLogo(tenantA, header, "huge.png");
+    expect(rejected.status).toBe(422);
+    expect(rejected.body.code).toBe("IMAGE_TOO_LARGE");
+  });
+
+  it("refuses bytes that do not read as the type they claim", async () => {
+    const rejected = await uploadLogo(tenantA, Buffer.from("plainly not a png"), "brand.png");
+    expect(rejected.status).toBe(422);
+    expect(rejected.body.code).toBe("BAD_IMAGE");
+  });
+
+  it("still requires the owner role before any of this is reachable", async () => {
+    const staffCookie = await addStaff(tenantA, `logo${stamp}`);
+    const attempt = await request(app)
+      .post("/api/business/logo")
+      .set("Cookie", staffCookie)
+      .attach("logo", realPng(512), "brand.png");
+    expect(attempt.status).toBe(403);
+    expect(attempt.body.code).toBe("FORBIDDEN");
   });
 });

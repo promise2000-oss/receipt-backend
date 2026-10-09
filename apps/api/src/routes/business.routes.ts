@@ -6,6 +6,7 @@ import { AppError, notFound } from "../lib/errors";
 import { asyncH, parse } from "../middleware/validate";
 import { requireAuth, requireOwner } from "../middleware/requireAuth";
 import { logoKey, getStorage } from "../lib/storage";
+import { assertLogoDimensions } from "../lib/image";
 import { toBusinessDTO } from "../mappers";
 
 export const businessRouter = Router();
@@ -66,6 +67,10 @@ businessRouter.post(
     if (!file) {
       throw new AppError("Choose a logo file to upload.", 422, "FILE_REQUIRED");
     }
+
+    // Before anything is written: type and byte size came from multer, and the
+    // pixel size is the last thing that could make this expensive to render.
+    assertLogoDimensions(file.buffer, file.mimetype);
 
     const key = logoKey(req.auth!.businessId, file.originalname || "logo");
     await getStorage().put(key, file.buffer, file.mimetype);
