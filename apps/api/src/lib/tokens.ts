@@ -67,6 +67,58 @@ export function verifyShareToken(token: string): ShareVerification {
 }
 
 /**
+ * Verification capability — the thing printed as a QR code.
+ *
+ * Deliberately different from the share link above:
+ *
+ *  - **No expiry.** A share link is a message you send; a QR is ink on paper
+ *    that has to keep resolving years later. An expiring token would leave
+ *    every printed receipt with a dead QR code after `SHARE_TTL_SECONDS`.
+ *  - **Minimal disclosure.** It only unlocks the verification view —
+ *    organization, receipt number, amount, date, status. It never exposes the
+ *    itemised receipt, the customer's contact details, or tenancy ids.
+ *
+ * It is still a pure HMAC capability: the receipt id on its own grants
+ * nothing, the signature cannot be forged without the server secret, and the
+ * comparison is timing-safe.
+ */
+export function signVerifyToken(receiptId: string): string {
+  const payload = `verify.${receiptId}`;
+  return `${b64url(payload)}.${hmac(payload)}`;
+}
+
+export type VerifyTokenResult =
+  | { ok: true; receiptId: string }
+  | { ok: false; reason: "malformed" | "bad_signature" };
+
+export function verifyVerifyToken(token: string): VerifyTokenResult {
+  if (!token || typeof token !== "string") return { ok: false, reason: "malformed" };
+
+  const parts = token.split(".");
+  if (parts.length !== 2) return { ok: false, reason: "malformed" };
+
+  let payload: string;
+  try {
+    payload = Buffer.from(parts[0], "base64url").toString("utf8");
+  } catch {
+    return { ok: false, reason: "malformed" };
+  }
+
+  const expected = hmac(payload);
+  const a = Buffer.from(parts[1]);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+    return { ok: false, reason: "bad_signature" };
+  }
+
+  if (!payload.startsWith("verify.")) return { ok: false, reason: "malformed" };
+  const receiptId = payload.slice("verify.".length);
+  if (!receiptId) return { ok: false, reason: "malformed" };
+
+  return { ok: true, receiptId };
+}
+
+/**
  * Generic signed token used to hand private storage keys to the browser.
  * Same construction, different purpose.
  */

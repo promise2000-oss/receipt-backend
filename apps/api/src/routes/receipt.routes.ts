@@ -19,7 +19,7 @@ import { renderReceiptHtml } from "../lib/document";
 import { logoDataUrl } from "../mappers";
 import { formatReceiptNumber } from "@eleos/shared";
 import { signShareToken } from "../lib/tokens";
-import { absoluteUrl } from "../lib/url";
+import { absoluteUrl, verificationUrl } from "../lib/url";
 import { getMailer } from "../lib/mail";
 import { env } from "../lib/env";
 import { toReceiptDTOs, toReceiptDTO, type ReceiptWithRelations } from "../mappers";
@@ -49,9 +49,13 @@ async function loadBusinessFor(businessId: string) {
 }
 
 /** Render + store the PDF once, then reuse it for every subsequent download. */
-async function ensurePdf(receipt: ReceiptWithRelations, businessId: string) {
+async function ensurePdf(
+  receipt: ReceiptWithRelations,
+  businessId: string,
+  verifyUrl: string,
+) {
   const business = await loadBusinessFor(businessId);
-  return ensureReceiptPdf(receipt, business);
+  return ensureReceiptPdf(receipt, business, verifyUrl);
 }
 
 // ---------------------------------------------------------------------------
@@ -248,6 +252,7 @@ receiptRouter.post(
         address: business.address,
         phone: business.phone,
         email: business.email,
+        website: business.website,
         currency: business.currency,
         brand_primary: business.brand_primary,
         brand_accent: business.brand_accent,
@@ -301,7 +306,9 @@ receiptRouter.get(
     const businessId = req.auth!.businessId;
     const receipt = await loadReceipt(businessId, pathParam(req, "id"));
     const business = await loadBusinessFor(businessId);
-    const html = renderReceiptHtml(await buildDocumentData(receipt, business));
+    const html = renderReceiptHtml(
+      await buildDocumentData(receipt, business, verificationUrl(req, receipt.id)),
+    );
     res.status(200).type("html").send(html);
   }),
 );
@@ -313,7 +320,7 @@ receiptRouter.get(
     const businessId = req.auth!.businessId;
     const receipt = await loadReceipt(businessId, pathParam(req, "id"));
 
-    const { buffer } = await ensurePdf(receipt, businessId);
+    const { buffer } = await ensurePdf(receipt, businessId, verificationUrl(req, receipt.id));
     const filename = `${receipt.receipt_number}.pdf`;
 
     res
@@ -331,7 +338,7 @@ receiptRouter.post(
   asyncH(async (req, res) => {
     const businessId = req.auth!.businessId;
     const receipt = await loadReceipt(businessId, pathParam(req, "id"));
-    await ensurePdf(receipt, businessId);
+    await ensurePdf(receipt, businessId, verificationUrl(req, receipt.id));
     const refreshed = await loadReceipt(businessId, receipt.id);
     res.json(await toReceiptDTO(refreshed));
   }),
@@ -442,6 +449,7 @@ receiptRouter.post(
     res.json({
       token,
       url: absoluteUrl(req, `/api/public/r/${token}/document`),
+      verify_url: verificationUrl(req, receipt.id),
       expires_at: expiresAt.toISOString(),
     });
   }),
@@ -459,7 +467,7 @@ receiptRouter.post(
     const viewUrl = absoluteUrl(req, `/api/public/r/${token}/document`);
 
     // Attach the branded PDF so the recipient gets the document itself.
-    const { buffer } = await ensurePdf(receipt, businessId);
+    const { buffer } = await ensurePdf(receipt, businessId, verificationUrl(req, receipt.id));
 
     const subject = `Receipt ${receipt.receipt_number} from ${business.name}`;
     const text = [
@@ -503,6 +511,7 @@ receiptRouter.get(
     res.json({
       token,
       url: absoluteUrl(req, `/api/public/r/${token}/document`),
+      verify_url: verificationUrl(req, receipt.id),
       expires_at: expiresAt.toISOString(),
     });
   }),

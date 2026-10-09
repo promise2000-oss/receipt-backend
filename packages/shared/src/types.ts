@@ -12,11 +12,13 @@ export interface BusinessDTO {
   address: string | null;
   phone: string | null;
   email: string | null;
+  website: string | null;
   currency: string;
   brand_primary: string;
   brand_accent: string;
   number_prefix: string;
   created_at: string;
+  updated_at: string;
 }
 
 export interface UserDTO {
@@ -112,6 +114,8 @@ export interface Paginated<T> {
 export interface ShareDTO {
   token: string;
   url: string;
+  /** Non-expiring verification page encoded into the receipt's QR code. */
+  verify_url: string;
   expires_at: string;
 }
 
@@ -125,10 +129,12 @@ export interface PublicReceiptDTO {
     | "address"
     | "phone"
     | "email"
+    | "website"
     | "currency"
     | "brand_primary"
     | "brand_accent"
   >;
+  verify_url: string;
   expires_at: string;
 }
 

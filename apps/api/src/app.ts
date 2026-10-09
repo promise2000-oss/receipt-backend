@@ -63,6 +63,11 @@ export function createApp(): Express {
     limit: 50,
     standardHeaders: "draft-7",
     legacyHeaders: false,
+    // `GET /auth/me` presents a session, it does not ask for one: there is
+    // nothing to brute-force. The app calls it from the client on every load
+    // *and* from the server when composing page titles, so charging it to the
+    // login budget would lock people out of a session they already hold.
+    skip: (req) => req.method === "GET" && req.path.endsWith("/me"),
     message: {
       message: "Too many attempts. Please wait a few minutes and try again.",
       code: "RATE_LIMITED",

@@ -42,11 +42,13 @@ export async function toBusinessDTO(business: Business): Promise<BusinessDTO> {
     address: business.address,
     phone: business.phone,
     email: business.email,
+    website: business.website,
     currency: business.currency,
     brand_primary: business.brand_primary,
     brand_accent: business.brand_accent,
     number_prefix: business.number_prefix,
     created_at: business.created_at.toISOString(),
+    updated_at: business.updated_at.toISOString(),
   };
 }
 

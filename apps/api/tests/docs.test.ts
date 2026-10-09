@@ -126,6 +126,7 @@ describe("OpenAPI document", () => {
       "GET /public/r/{token}",
       "GET /public/r/{token}/document",
       "GET /public/r/{token}/download",
+      "GET /public/verify/{token}",
       "POST /auth/login",
       "POST /auth/logout",
       "POST /auth/signup",

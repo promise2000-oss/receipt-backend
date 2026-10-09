@@ -1,7 +1,12 @@
-// Eleosstyles Receipt System — PostgreSQL schema
+// Receipt platform — PostgreSQL schema
 //
 // Tenant isolation is structural: every tenant-owned row carries business_id
 // and every query in the API is forced through a scope guard (see src/lib/prisma.ts).
+//
+// `Business` IS the organization/tenant. There is deliberately no separate
+// Organization model: a business owns its users, customers and receipts, and
+// the session JWT mints business_id at login so no route ever trusts an
+// organization id supplied by the client.
 
 generator client {
   provider = "prisma-client-js"
@@ -50,6 +55,8 @@ model Business {
   address         String?
   phone           String?
   email           String?
+  /// Public site shown on receipts and the verification page.
+  website         String?
   currency        String   @default("NGN")
   brand_primary   String   @default("#111111")
   brand_accent    String   @default("#B8912F")
@@ -59,6 +66,8 @@ model Business {
   /// AND gap-free per business even when requests race.
   receipt_counter Int      @default(0)
   created_at      DateTime @default(now())
+  /// `DEFAULT now()` so pre-existing rows are backfilled by the migration.
+  updated_at      DateTime @default(now()) @updatedAt
 
   users     User[]
   customers Customer[]

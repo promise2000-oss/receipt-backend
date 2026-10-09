@@ -13,8 +13,9 @@ import type { ReceiptWithRelations } from "../mappers";
 export async function ensureReceiptPdf(
   receipt: ReceiptWithRelations,
   business: Business,
+  verifyUrl?: string | null,
 ): Promise<{ buffer: Buffer; key: string }> {
-  const data = await buildDocumentData(receipt, business);
+  const data = await buildDocumentData(receipt, business, verifyUrl);
   const buffer = await renderReceiptPdf(data);
 
   const key = pdfKey(business.id, receipt.id);
@@ -32,11 +33,12 @@ export async function ensureReceiptPdf(
 export async function getOrCreateReceiptPdf(
   receipt: ReceiptWithRelations,
   business: Business,
+  verifyUrl?: string | null,
 ): Promise<Buffer> {
   if (receipt.pdf_url) {
     const existing = await getStorage().getBuffer(receipt.pdf_url);
     if (existing) return existing;
   }
-  const { buffer } = await ensureReceiptPdf(receipt, business);
+  const { buffer } = await ensureReceiptPdf(receipt, business, verifyUrl);
   return buffer;
 }

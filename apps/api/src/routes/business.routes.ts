@@ -4,7 +4,7 @@ import { businessUpdateSchema } from "@eleos/shared";
 import { prisma } from "../lib/prisma";
 import { AppError, notFound } from "../lib/errors";
 import { asyncH, parse } from "../middleware/validate";
-import { requireAuth } from "../middleware/requireAuth";
+import { requireAuth, requireOwner } from "../middleware/requireAuth";
 import { logoKey, getStorage } from "../lib/storage";
 import { toBusinessDTO } from "../mappers";
 
@@ -39,6 +39,7 @@ businessRouter.get(
 
 businessRouter.patch(
   "/",
+  requireOwner,
   asyncH(async (req, res) => {
     const input = parse(businessUpdateSchema, req.body);
 
@@ -58,6 +59,7 @@ businessRouter.patch(
 
 businessRouter.post(
   "/logo",
+  requireOwner,
   upload.single("logo"),
   asyncH(async (req, res) => {
     const file = req.file;
@@ -90,6 +92,7 @@ businessRouter.post(
 
 businessRouter.delete(
   "/logo",
+  requireOwner,
   asyncH(async (req, res) => {
     const current = await prisma.business.findFirst({
       where: { id: req.auth!.businessId },

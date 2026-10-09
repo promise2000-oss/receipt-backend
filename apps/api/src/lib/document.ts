@@ -32,6 +32,7 @@ export interface DocumentData {
     address?: string | null;
     phone?: string | null;
     email?: string | null;
+    website?: string | null;
     currency: string;
     brand_primary: string;
     brand_accent: string;
@@ -56,6 +57,10 @@ export interface DocumentData {
   };
   /** Absolute or data: URLs only — the PDF renderer has no page origin. */
   logo_data_url?: string | null;
+  /** Public verification page this receipt's QR code resolves to. */
+  verify_url?: string | null;
+  /** Pre-encoded QR as a data: URL (see lib/qr.ts). */
+  qr_data_url?: string | null;
 }
 
 /** Escape anything interpolated into the document. */
@@ -113,7 +118,14 @@ export function renderReceiptHtml(input: DocumentData): string {
   const accent = business.brand_accent || "#B8912F";
   const currency = business.currency || "NGN";
   const logo = input.logo_data_url ?? business.logo_data_url ?? null;
+  const qr = input.qr_data_url ?? null;
   const isVoid = receipt.status === "void";
+
+  // Issuer contact lines, in order, blanks dropped so we never print a
+  // dangling separator when an organization leaves a field empty.
+  const contactLines = [business.address, business.phone, business.email, business.website].filter(
+    (line): line is string => Boolean(line),
+  );
 
   const balance = round2(receipt.total - receipt.paid_amount);
 
@@ -398,6 +410,47 @@ export function renderReceiptHtml(input: DocumentData): string {
   .contact { font-size: 10.5px; color: var(--muted); text-align: right; line-height: 1.7; }
   .footer-rule { height: 1px; background: var(--accent); opacity: 0.5; margin-bottom: 16px; }
 
+  /* Right-hand footer column: verification QR above the issuer's contact
+     details. The white plate baked into the QR data URL guarantees the quiet
+     zone whatever the surrounding tint. */
+  .footer-side {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 14px;
+    flex: none;
+  }
+  .qr-block {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 7px;
+    padding: 7px;
+    background: #ffffff;
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+  }
+  .qr-block img { width: 84px; height: 84px; display: block; }
+  .qr-caption {
+    font-size: 8px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 600;
+    text-align: center;
+    line-height: 1.4;
+  }
+
+  /* Platform attribution — deliberately quiet so the issuer stays primary. */
+  .powered {
+    margin-top: 13px;
+    font-size: 9px;
+    letter-spacing: 1.6px;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .powered b { font-weight: 700; color: var(--ink); letter-spacing: 2px; }
+
   .void-banner {
     background: var(--accent);
     color: var(--cream);
@@ -546,11 +599,18 @@ export function renderReceiptHtml(input: DocumentData): string {
               published returns policy. Please retain this receipt for your records.
               Issued electronically.
             </div>
+            <div class="powered">Powered by <b>VisionaryGene</b></div>
           </div>
-          <div class="contact">
-            ${business.address ? `${esc(business.address)}<br/>` : ""}
-            ${business.phone ? `${esc(business.phone)}<br/>` : ""}
-            ${business.email ? `${esc(business.email)}` : ""}
+          <div class="footer-side">
+            ${
+              qr
+                ? `<div class="qr-block">
+              <img src="${esc(qr)}" alt="Scan to verify receipt ${esc(receipt.receipt_number)}" width="84" height="84" />
+              <div class="qr-caption">Scan to verify</div>
+            </div>`
+                : ""
+            }
+            <div class="contact">${contactLines.map(esc).join("<br/>")}</div>
           </div>
         </div>
       </div>

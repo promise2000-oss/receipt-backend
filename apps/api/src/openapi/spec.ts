@@ -676,6 +676,28 @@ export const openApiSpec: Json = {
       }),
     },
 
+    "/public/verify/{token}": {
+      get: op({
+        tag: "Public share",
+        operationId: "verifyReceipt",
+        summary: "Receipt verification page",
+        description:
+          "What a scan of the QR code printed on a receipt returns: a standalone " +
+          "page confirming the receipt is genuine, who issued it, its number, " +
+          "amount, date and status. The token is an HMAC capability with no " +
+          "expiry — it is ink on paper, so it must keep resolving long after a " +
+          "share link would have lapsed. Deliberately minimal: no line items, " +
+          "no customer details, no tenancy ids. No session required.",
+        public: true,
+        parameters: [tokenParam()],
+        responses: [
+          [200, html("The verification page.")],
+          [403, error("Token invalid (VERIFY_INVALID) or malformed (VERIFY_MALFORMED).")],
+          [404, error("Receipt no longer exists.")],
+        ],
+      }),
+    },
+
     "/public/r/{token}/document": {
       get: op({
         tag: "Public share",

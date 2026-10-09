@@ -94,6 +94,12 @@ export const businessUpdateSchema = z.object({
     .max(240)
     .optional()
     .transform((v) => (v === "" ? null : v)),
+  website: z
+    .string()
+    .trim()
+    .max(200)
+    .optional()
+    .transform((v) => (v === "" ? null : v)),
   currency: z.string().trim().min(3).max(3).optional(),
   brand_primary: z
     .string()

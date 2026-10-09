@@ -120,11 +120,13 @@ export const responseSchemas: Record<string, Json> = {
       address: nullable(str()),
       phone: nullable(str()),
       email: nullable(str()),
+      website: nullable(str("Public website shown on receipts.")),
       currency: str("ISO 4217 code, e.g. NGN."),
       brand_primary: str("Hex colour used for the receipt header band."),
       brand_accent: str("Hex colour used for the gold rules and total row."),
       number_prefix: str("Prefix of the sequential receipt number, e.g. ES."),
       created_at: str(TIMESTAMP),
+      updated_at: str(TIMESTAMP),
     },
     [
       "id",
@@ -133,11 +135,13 @@ export const responseSchemas: Record<string, Json> = {
       "address",
       "phone",
       "email",
+      "website",
       "currency",
       "brand_primary",
       "brand_accent",
       "number_prefix",
       "created_at",
+      "updated_at",
     ],
   ),
 
@@ -291,9 +295,12 @@ export const responseSchemas: Record<string, Json> = {
     {
       token: str("Opaque share token; no receipt id is exposed."),
       url: str("Absolute URL of the public receipt page."),
+      verify_url: str(
+        "Absolute URL of the verification page — this is what the receipt's QR code encodes. Never expires.",
+      ),
       expires_at: str(TIMESTAMP),
     },
-    ["token", "url", "expires_at"],
+    ["token", "url", "verify_url", "expires_at"],
   ),
 
   EmailResult: obj(
@@ -327,15 +334,29 @@ export const responseSchemas: Record<string, Json> = {
           address: nullable(str()),
           phone: nullable(str()),
           email: nullable(str()),
+          website: nullable(str()),
           currency: str(),
           brand_primary: str(),
           brand_accent: str(),
         },
-        ["name", "logo_url", "address", "phone", "email", "currency", "brand_primary", "brand_accent"],
+        [
+          "name",
+          "logo_url",
+          "address",
+          "phone",
+          "email",
+          "website",
+          "currency",
+          "brand_primary",
+          "brand_accent",
+        ],
+      ),
+      verify_url: str(
+        "Absolute URL of the non-expiring verification page for this receipt.",
       ),
       expires_at: str(TIMESTAMP),
     },
-    ["receipt", "business", "expires_at"],
+    ["receipt", "business", "verify_url", "expires_at"],
   ),
 
   /** Same as Receipt with tenancy metadata stripped — never leaks business_id. */
