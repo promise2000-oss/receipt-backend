@@ -4,7 +4,9 @@ import {
   PAYMENT_METHOD_LABELS,
   PAYMENT_STATUS_LABELS,
   round2,
+  type WatermarkConfig,
 } from "@eleos/shared";
+import { renderWatermark } from "./watermark";
 
 /**
  * The receipt document.
@@ -61,6 +63,12 @@ export interface DocumentData {
   verify_url?: string | null;
   /** Pre-encoded QR as a data: URL (see lib/qr.ts). */
   qr_data_url?: string | null;
+  /**
+   * The tenant's watermark settings. Omitted means "on, VISIONARYGENE, 8%" —
+   * see `resolveWatermark` — so a caller that predates the feature still gets
+   * the platform default rather than an unwatermarked document.
+   */
+  watermark?: Partial<WatermarkConfig> | null;
 }
 
 /** Escape anything interpolated into the document. */
@@ -120,6 +128,7 @@ export function renderReceiptHtml(input: DocumentData): string {
   const logo = input.logo_data_url ?? business.logo_data_url ?? null;
   const qr = input.qr_data_url ?? null;
   const isVoid = receipt.status === "void";
+  const watermark = renderWatermark(input.watermark);
 
   // Issuer contact lines, in order, blanks dropped so we never print a
   // dangling separator when an organization leaves a field empty.
@@ -476,6 +485,12 @@ export function renderReceiptHtml(input: DocumentData): string {
     white-space: nowrap;
   }
 
+  /* The content that must stay above the watermark. The band is opaque, so
+     it needs an explicit stacking context or the watermark would print over
+     the header text. */
+  .band, .body, .void-banner { position: relative; z-index: 1; }
+${watermark.css}
+
   @media print {
     @page { size: A4; margin: 0; }
     html, body { background: var(--cream); }
@@ -495,6 +510,7 @@ export function renderReceiptHtml(input: DocumentData): string {
 <body>
   <div class="sheet">
     <div class="frame">
+      ${watermark.html}
       ${isVoid ? '<div class="void-watermark" aria-hidden="true">VOID</div>' : ""}
       ${
         isVoid

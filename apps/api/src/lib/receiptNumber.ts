@@ -1,5 +1,5 @@
 import type { PrismaClient, Prisma } from "@prisma/client";
-import { formatReceiptNumber } from "@eleos/shared";
+import { formatInvoiceNumber, formatReceiptNumber } from "@eleos/shared";
 
 /**
  * Per-business sequential receipt numbers, e.g. ES-000214.
@@ -24,4 +24,28 @@ export async function nextReceiptNumber(
   });
 
   return formatReceiptNumber(business.number_prefix, business.receipt_counter);
+}
+
+/**
+ * Per-business sequential invoice numbers — `INV-000042`.
+ *
+ * Identical locking strategy to receipts, but on its own `invoice_counter`
+ * column. The two series are independent on purpose: issuing an invoice must
+ * not leave a hole in the receipt numbering a shopkeeper may already have
+ * promised a customer, and vice versa.
+ */
+export async function nextInvoiceNumber(
+  tx: Prisma.TransactionClient | PrismaClient,
+  businessId: string,
+): Promise<string> {
+  const business = await tx.business.update({
+    where: { id: businessId },
+    data: { invoice_counter: { increment: 1 } },
+    select: { invoice_counter: true },
+  });
+
+  // `number_prefix` is deliberately not reused: a receipt prefix like "ES"
+  // reads as a sales document, and an invoice carrying it would be
+  // indistinguishable from one in a stack of paperwork.
+  return formatInvoiceNumber(business.invoice_counter);
 }

@@ -33,6 +33,14 @@ export async function buildDocumentData(
     logo_data_url: logo,
     verify_url: verifyUrl ?? null,
     qr_data_url: qr,
+    // The tenant's own watermark settings. Omitting these would fall back to
+    // the platform default, which is right — but reading them here is what
+    // lets an organization turn the watermark off or re-word it.
+    watermark: {
+      enabled: business.watermark_enabled,
+      text: business.watermark_text,
+      opacity: business.watermark_opacity,
+    },
     receipt: {
       receipt_number: receipt.receipt_number,
       issue_date: receipt.issue_date,

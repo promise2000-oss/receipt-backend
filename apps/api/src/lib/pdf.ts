@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import type { Browser } from "puppeteer";
 import { env } from "./env";
 import { renderReceiptHtml, type DocumentData } from "./document";
+import { renderInvoiceHtml, type InvoiceDocumentData } from "./invoiceDocument";
 
 let browserPromise: Promise<Browser> | null = null;
 let bundledHinted = false;
@@ -114,6 +115,56 @@ export async function htmlToPdf(html: string): Promise<Buffer> {
 /** Build the branded document and turn it into a PDF in one step. */
 export async function renderReceiptPdf(data: DocumentData): Promise<Buffer> {
   return htmlToPdf(renderReceiptHtml(data));
+}
+
+/** Same, for an invoice. */
+export async function renderInvoicePdf(data: InvoiceDocumentData): Promise<Buffer> {
+  return htmlToPdf(renderInvoiceHtml(data));
+}
+
+/* --------------------------------- Images -------------------------------- */
+
+/**
+ * Render a document to a high-quality PNG.
+ *
+ * This is server-side by design. The obvious shortcut — screenshotting an
+ * element in the browser — produces a picture of whatever the user's screen
+ * happened to show: clipped to the viewport, styled by the app's CSS, at
+ * whatever device pixel ratio the device reports. Rendering the same HTML the
+ * PDF is built from, in the same headless browser, means the exported image
+ * and the exported PDF are the same document — watermark, branding, totals and
+ * all.
+ *
+ * `scale: 2` doubles the pixel density, so the PNG is roughly 1588px wide on
+ * A4 and stays crisp when a customer opens it on a phone or prints it.
+ */
+export async function htmlToPng(html: string): Promise<Buffer> {
+  const browser = await getBrowser();
+  const page = await browser.newPage();
+
+  try {
+    // A4 at 96dpi. `fullPage` then captures however tall the document
+    // actually is, so a long itemisation is never cut off at the fold.
+    await page.setViewport({ width: 900, height: 1400, deviceScaleFactor: 2 });
+    await page.setContent(html, { waitUntil: "load", timeout: 30_000 });
+
+    await Promise.race([
+      page.evaluate("document.fonts && document.fonts.ready"),
+      new Promise((resolve) => setTimeout(resolve, 4_000)),
+    ]);
+
+    const png = await page.screenshot({
+      fullPage: true,
+      type: "png",
+      // The page background is the document's own cream, so the capture has no
+      // transparent gutter around it.
+      omitBackground: false,
+    });
+
+    return Buffer.from(png);
+  } finally {
+    await page.close().catch(() => undefined);
+  }
 }
 
 export async function closeBrowser(): Promise<void> {

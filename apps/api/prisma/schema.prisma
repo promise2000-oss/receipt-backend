@@ -48,6 +48,24 @@ enum ReceiptStatus {
   void
 }
 
+/// What produced a receipt. `standalone` is a point-of-sale document;
+/// `invoice_payment` is generated from a payment recorded against an invoice.
+enum ReceiptSource {
+  standalone
+  invoice_payment
+}
+
+/// Invoice lifecycle. `overdue` is *derived* — see `refreshInvoiceStatus` —
+/// but it is stored so the list can filter on it without recomputing per row.
+enum InvoiceStatus {
+  draft
+  issued
+  partially_paid
+  paid
+  overdue
+  cancelled
+}
+
 model Business {
   id              String   @id @default(uuid())
   name            String
@@ -65,13 +83,28 @@ model Business {
   /// Monotonic counter. Incremented under a row lock so numbers are unique
   /// AND gap-free per business even when requests race.
   receipt_counter Int      @default(0)
+  /// Same scheme as `receipt_counter`, for the `INV-000001` series. Kept as a
+  /// separate column so the two document series can never interfere.
+  invoice_counter Int      @default(0)
+  /// ── Document watermarking ─────────────────────────────────────────────
+  /// The VisionaryGene watermark is on by default: the platform is operated by
+  /// VisionaryGene and the documents it renders are attributed to it. An
+  /// organization may set its own text or turn it off entirely; both are
+  /// owner-only settings enforced in the API, never from the client.
+  watermark_enabled Boolean @default(true)
+  watermark_text    String   @default("VISIONARYGENE")
+  /// 0–100. Clamped by the update schema so a tenant can never make the
+  /// watermark opaque enough to obscure its own financial figures.
+  watermark_opacity Int      @default(8)
   created_at      DateTime @default(now())
   /// `DEFAULT now()` so pre-existing rows are backfilled by the migration.
   updated_at      DateTime @default(now()) @updatedAt
 
-  users     User[]
-  customers Customer[]
-  receipts  Receipt[]
+  users      User[]
+  customers  Customer[]
+  receipts   Receipt[]
+  invoices   Invoice[]
+  invoice_payments InvoicePayment[]
 
   @@map("businesses")
 }
@@ -88,6 +121,8 @@ model User {
 
   business      Business  @relation(fields: [business_id], references: [id], onDelete: Cascade)
   receipts      Receipt[]
+  invoices      Invoice[]
+  invoice_payments InvoicePayment[]
 
   @@index([business_id])
   @@map("users")
@@ -103,6 +138,7 @@ model Customer {
 
   business   Business   @relation(fields: [business_id], references: [id], onDelete: Cascade)
   receipts   Receipt[]
+  invoices   Invoice[]
 
   @@index([business_id])
   @@index([business_id, name])
@@ -115,6 +151,15 @@ model Receipt {
   customer_id       String?
   /// Unique per business, never globally: ES-000214
   receipt_number    String
+  /// A standalone sale, or the acknowledgement of a payment against an
+  /// invoice. Both are real receipts and both print identically; the flag
+  /// exists so history can tell them apart and so an invoice payment receipt
+  /// can be traced back to the payment that caused it.
+  source            ReceiptSource @default(standalone)
+  /// Set when this receipt acknowledges a payment on an invoice. Unique
+  /// because one payment yields at most one receipt — that uniqueness is what
+  /// makes double-generation impossible even under concurrent requests.
+  invoice_payment_id String? @unique
   issue_date        DateTime      @default(now())
   subtotal          Decimal       @db.Decimal(14, 2)
   discount          Decimal       @default(0) @db.Decimal(14, 2)
@@ -144,12 +189,19 @@ model Receipt {
   original_receipt Receipt?    @relation("Reissue", fields: [original_receipt_id], references: [id], onDelete: SetNull)
   reissues         Receipt[]    @relation("Reissue")
   items            ReceiptItem[]
+  /// The payment this receipt acknowledges, when `source = invoice_payment`.
+  /// This side owns the foreign key because the receipt detail screen is the
+  /// hot path — it loads the payment in the same query as the document.
+  /// `Restrict`: a payment is a financial record, so deleting one must never
+  /// silently delete the document that proves it happened.
+  invoice_payment  InvoicePayment? @relation(fields: [invoice_payment_id], references: [id], onDelete: Restrict)
 
   /// The database, not the application, is the final authority on numbering.
   @@unique([business_id, receipt_number])
   @@index([business_id, created_at])
   @@index([business_id, status])
   @@index([business_id, issue_date])
+  @@index([invoice_payment_id])
   @@map("receipts")
 }
 
@@ -167,4 +219,105 @@ model ReceiptItem {
 
   @@index([receipt_id])
   @@map("receipt_items")
+}
+
+/// An invoice: goods/services owed, with a lifecycle and a payment history.
+///
+/// Like a receipt, an issued invoice is immutable in its money fields — a
+/// correction is cancel + reissue, never an edit of a document the customer
+/// may already have paid against. A `draft` is the one editable state.
+model Invoice {
+  id           String        @id @default(uuid())
+  business_id  String
+  customer_id  String?
+  /// Unique per business, never globally: INV-000042.
+  invoice_number String
+  issue_date   DateTime      @default(now())
+  due_date     DateTime?
+  subtotal     Decimal       @db.Decimal(14, 2)
+  discount     Decimal       @default(0) @db.Decimal(14, 2)
+  tax          Decimal       @default(0) @db.Decimal(14, 2)
+  tax_rate     Decimal       @default(0) @db.Decimal(5, 2)
+  total        Decimal       @db.Decimal(14, 2)
+  /// Sum of the payments recorded against this invoice. Denormalised so the
+  /// list and dashboard can sort and sum without a per-row aggregate, and
+  /// rewritten inside the same transaction that records a payment.
+  amount_paid  Decimal       @default(0) @db.Decimal(14, 2)
+  status       InvoiceStatus @default(draft)
+  notes        String?
+  /// Payment terms shown on the document, e.g. "Net 30".
+  terms        String?
+  /// The customer's own purchase-order reference, when they gave one.
+  po_reference String?
+  /// Set once the branded PDF has been rendered and stored.
+  pdf_url      String?
+  /// Frozen at issue time. See the note on the model.
+  issued_snapshot Json?
+  issued_at    DateTime?
+  /// Cancellation is a business event, not a delete: the row and its payment
+  /// history are retained so the ledger still reconciles.
+  cancelled_at DateTime?
+  cancel_reason String?
+  created_by   String
+  created_at   DateTime      @default(now())
+  updated_at   DateTime      @updatedAt
+
+  business        Business        @relation(fields: [business_id], references: [id], onDelete: Cascade)
+  customer        Customer?       @relation(fields: [customer_id], references: [id], onDelete: SetNull)
+  created_by_user User            @relation(fields: [created_by], references: [id], onDelete: Restrict)
+  items           InvoiceItem[]
+  payments        InvoicePayment[]
+
+  @@unique([business_id, invoice_number])
+  @@index([business_id, created_at])
+  @@index([business_id, status])
+  @@index([business_id, issue_date])
+  @@map("invoices")
+}
+
+model InvoiceItem {
+  id          String  @id @default(uuid())
+  invoice_id  String
+  /// Keeps line order stable in the rendered document.
+  position    Int     @default(0)
+  description String
+  quantity    Decimal @db.Decimal(14, 3)
+  unit_price  Decimal @db.Decimal(14, 2)
+  line_total  Decimal @db.Decimal(14, 2)
+
+  invoice Invoice @relation(fields: [invoice_id], references: [id], onDelete: Cascade)
+
+  @@index([invoice_id])
+  @@map("invoice_items")
+}
+
+/// One payment received against an invoice.
+///
+/// Several payments may settle one invoice (deposit, part-payment, balance),
+/// and each one can carry its own generated receipt, so this — not the
+/// invoice — is the unit of receipt generation. `amount` is stored rather
+/// than derived so history stays readable after a correction.
+model InvoicePayment {
+  id          String        @id @default(uuid())
+  business_id String
+  invoice_id  String
+  amount      Decimal       @db.Decimal(14, 2)
+  paid_at     DateTime      @default(now())
+  method      PaymentMethod @default(cash)
+  /// The customer's own reference for this payment (transfer ref, cheque no).
+  reference   String?
+  notes       String?
+  created_by  String
+  created_at  DateTime      @default(now())
+
+  business Business  @relation(fields: [business_id], references: [id], onDelete: Cascade)
+  invoice  Invoice   @relation(fields: [invoice_id], references: [id], onDelete: Cascade)
+  user     User      @relation(fields: [created_by], references: [id], onDelete: Restrict)
+  /// Inverse of `Receipt.invoice_payment` — this payment's generated receipt,
+  /// if one was requested at the time.
+  receipt  Receipt?  @relation
+
+  @@index([business_id, created_at])
+  @@index([invoice_id, paid_at])
+  @@map("invoice_payments")
 }

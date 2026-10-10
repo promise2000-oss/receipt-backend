@@ -17,6 +17,7 @@ import { authRouter } from "./routes/auth.routes";
 import { businessRouter } from "./routes/business.routes";
 import { customerRouter } from "./routes/customer.routes";
 import { receiptRouter } from "./routes/receipt.routes";
+import { invoiceRouter } from "./routes/invoice.routes";
 import { dashboardRouter } from "./routes/dashboard.routes";
 import { publicRouter } from "./routes/public.routes";
 import { filesRouter } from "./routes/files.routes";
@@ -82,6 +83,7 @@ export function createApp(): Express {
   app.use("/api/business", businessRouter);
   app.use("/api/customers", customerRouter);
   app.use("/api/receipts", receiptRouter);
+  app.use("/api/invoices", invoiceRouter);
   app.use("/api/dashboard", dashboardRouter);
   app.use("/api/files", filesRouter);
   // Public share links last: they are capability URLs, not sessions.

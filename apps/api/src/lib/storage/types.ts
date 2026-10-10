@@ -31,6 +31,11 @@ export function pdfKey(businessId: string, receiptId: string): string {
   return `receipts/${businessId}/${receiptId}.pdf`;
 }
 
+/** `invoices/<businessId>/<invoiceId>.pdf` */
+export function invoicePdfKey(businessId: string, invoiceId: string): string {
+  return `invoices/${businessId}/${invoiceId}.pdf`;
+}
+
 /** `logos/<businessId>/<timestamp>-<name>` */
 export function logoKey(businessId: string, filename: string): string {
   const safe = filename.replace(/[^a-zA-Z0-9._-]/g, "_").slice(-60);

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { PAYMENT_METHODS, PAYMENT_STATUSES } from "./enums";
-import { lineTotal } from "./money";
+import { lineTotal, outstandingBalance } from "./money";
+import { MAX_WATERMARK_OPACITY } from "./brand";
 
 /** Deliberately regex-based rather than `z.email()` so behaviour is stable
  *  across zod minor upgrades. */
@@ -117,6 +118,23 @@ export const businessUpdateSchema = z.object({
     .max(6)
     .optional()
     .transform((v) => (v ? v.toUpperCase().replace(/[^A-Z0-9]/g, "") : undefined)),
+
+  /* ---- Document watermarking ---- */
+  // Owner-only in the API (see `requireOwner` on PATCH /business). The opacity
+  // ceiling stops a tenant from setting a watermark opaque enough to make its
+  // own totals unreadable.
+  watermark_enabled: z.boolean().optional(),
+  watermark_text: z
+    .string()
+    .trim()
+    .max(40, "Watermark text is too long")
+    .optional(),
+  watermark_opacity: z
+    .number({ error: "Enter a number" })
+    .finite()
+    .min(0, "Opacity cannot be negative")
+    .max(MAX_WATERMARK_OPACITY, `Keep the watermark at or below ${MAX_WATERMARK_OPACITY}%`)
+    .optional(),
 });
 export type BusinessUpdateInput = z.infer<typeof businessUpdateSchema>;
 
@@ -229,3 +247,189 @@ export const shareReceiptSchema = z.object({
     .max(31_536_000, "Maximum share lifetime is 1 year")
     .optional(),
 });
+
+// ---------------------------------------------------------------------------
+// Invoices
+// ---------------------------------------------------------------------------
+
+/** `YYYY-MM-DD`, or null when the field was cleared. */
+const isoDateField = z
+  .string()
+  .trim()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD");
+
+/**
+ * A line on an invoice. Same shape and same rules as a receipt line — the two
+ * documents are the same arithmetic, and a shared schema means a value that is
+ * rejected on one is rejected on the other too.
+ */
+export const invoiceItemSchema = z
+  .object({
+    description: z
+      .string()
+      .trim()
+      .min(1, "Each line needs a description")
+      .max(240),
+    quantity: amountField.refine((v) => v > 0, "Quantity must be at least 1"),
+    unit_price: amountField,
+  })
+  .superRefine((item, ctx) => {
+    if (lineTotal(item.quantity, item.unit_price) <= 0) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Line total must be greater than zero",
+        path: ["unit_price"],
+      });
+    }
+  });
+
+export const invoiceCreateSchema = z
+  .object({
+    customer_id: z.string().trim().min(1).nullish(),
+    issue_date: isoDateField.optional(),
+    due_date: isoDateField.nullish().transform((v) => v || null),
+    items: z
+      .array(invoiceItemSchema)
+      .min(1, "Add at least one line item")
+      .max(200, "An invoice can hold at most 200 lines"),
+    discount: amountField.default(0),
+    tax_rate: z
+      .number({ error: "Enter a tax rate" })
+      .finite()
+      .min(0, "Tax rate cannot be negative")
+      .max(100, "Tax rate cannot exceed 100%")
+      .default(0),
+    notes: z
+      .string()
+      .trim()
+      .max(1000)
+      .nullish()
+      .transform((v) => (v ? v : null)),
+    terms: z
+      .string()
+      .trim()
+      .max(240)
+      .nullish()
+      .transform((v) => (v ? v : null)),
+    po_reference: z
+      .string()
+      .trim()
+      .max(80)
+      .nullish()
+      .transform((v) => (v ? v : null)),
+    /** Send `true` to issue immediately instead of saving a draft. */
+    issue: z.boolean().default(false),
+  })
+  .superRefine((invoice, ctx) => {
+    // A due date before the issue date is not a payment schedule, it is a
+    // typo — and it would silently mark a brand-new invoice overdue.
+    if (!invoice.due_date || !invoice.issue_date) return;
+    if (invoice.due_date < invoice.issue_date) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Due date cannot be before the issue date",
+        path: ["due_date"],
+      });
+    }
+  });
+export type InvoiceCreateInput = z.infer<typeof invoiceCreateSchema>;
+
+/** Draft-only edits. The API rejects this on any other status. */
+export const invoiceUpdateSchema = z.object({
+  due_date: isoDateField.nullish().transform((v) => v || null),
+  items: z
+    .array(invoiceItemSchema)
+    .min(1, "Add at least one line item")
+    .max(200, "An invoice can hold at most 200 lines")
+    .optional(),
+  discount: amountField.optional(),
+  tax_rate: z
+    .number({ error: "Enter a tax rate" })
+    .finite()
+    .min(0, "Tax rate cannot be negative")
+    .max(100, "Tax rate cannot exceed 100%")
+    .optional(),
+  notes: z
+    .string()
+    .trim()
+    .max(1000)
+    .nullish()
+    .transform((v) => (v ? v : null)),
+  terms: z
+    .string()
+    .trim()
+    .max(240)
+    .nullish()
+    .transform((v) => (v ? v : null)),
+  po_reference: z
+    .string()
+    .trim()
+    .max(80)
+    .nullish()
+    .transform((v) => (v ? v : null)),
+});
+export type InvoiceUpdateInput = z.infer<typeof invoiceUpdateSchema>;
+
+export const invoiceCancelSchema = z.object({
+  reason: z
+    .string()
+    .trim()
+    .min(3, "Give a short reason for cancelling")
+    .max(240),
+});
+export type InvoiceCancelInput = z.infer<typeof invoiceCancelSchema>;
+
+/**
+ * Recording a payment.
+ *
+ * `amount` is validated against the outstanding balance by the *server*, not
+ * here — this schema only knows the shape. The balance check needs the stored
+ * invoice, so it belongs in the route where the transaction lives.
+ */
+export const invoicePaymentSchema = z.object({
+  amount: amountField.refine((v) => v > 0, "Payment must be greater than zero"),
+  paid_at: isoDateField.optional(),
+  method: z.enum(PAYMENT_METHODS as [string, ...string[]]).default("cash"),
+  reference: z
+    .string()
+    .trim()
+    .max(120)
+    .nullish()
+    .transform((v) => (v ? v : null)),
+  notes: z
+    .string()
+    .trim()
+    .max(500)
+    .nullish()
+    .transform((v) => (v ? v : null)),
+  /**
+   * Generate the matching receipt in the same transaction as the payment.
+   * Defaults to true — a recorded payment with no document is the state the
+   * product exists to avoid.
+   */
+  generate_receipt: z.boolean().default(true),
+});
+export type InvoicePaymentInput = z.infer<typeof invoicePaymentSchema>;
+
+export const invoiceShareSchema = z.object({
+  ttl_seconds: z
+    .number()
+    .int()
+    .min(3600, "Minimum share lifetime is 1 hour")
+    .max(31_536_000, "Maximum share lifetime is 1 year")
+    .optional(),
+});
+
+/**
+ * Guard used by the payment route. Exported so the tests assert against the
+ * same rule the API enforces rather than restating it.
+ */
+export function assertPaymentWithinBalance(
+  amount: number,
+  total: number,
+  amountPaid: number,
+): { ok: true } | { ok: false; outstanding: number } {
+  const outstanding = outstandingBalance(total, amountPaid);
+  if (amount > outstanding + 0.0001) return { ok: false, outstanding };
+  return { ok: true };
+}

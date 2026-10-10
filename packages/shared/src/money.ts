@@ -54,6 +54,18 @@ export function computeTotals(
   return { subtotal, discount: safeDiscount, tax, total: round2(net + tax) };
 }
 
+/**
+ * Money still owed on an invoice.
+ *
+ * Floored at zero rather than allowed to go negative: an overpayment is
+ * refused at the API boundary, and this guarantees that even a record which
+ * somehow holds more than it owes still reports a balance of 0 rather than a
+ * negative number a customer could be shown.
+ */
+export function outstandingBalance(total: number, amountPaid: number): number {
+  return Math.max(0, round2(Number(total || 0)) - round2(Number(amountPaid || 0)));
+}
+
 /** Format an amount for display, e.g. `₦125,000.00`. */
 export function formatMoney(amount: number, currency = "NGN"): string {
   const value = Number(amount || 0);

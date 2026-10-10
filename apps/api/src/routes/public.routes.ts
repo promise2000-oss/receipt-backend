@@ -5,12 +5,16 @@ import { asyncH, pathParam } from "../middleware/validate";
 import { requireAuth } from "../middleware/requireAuth";
 import { verifyShareToken, verifyVerifyToken } from "../lib/tokens";
 import { getOrCreateReceiptPdf, ensureReceiptPdf } from "../lib/pdfStore";
+import { getOrCreateInvoicePdf, ensureInvoicePdf } from "../lib/invoicePdfStore";
 import { buildDocumentData } from "../lib/documentData";
+import { buildInvoiceDocumentData } from "../lib/invoiceDocumentData";
 import { renderReceiptHtml } from "../lib/document";
+import { renderInvoiceHtml } from "../lib/invoiceDocument";
 import { renderVerificationHtml } from "../lib/verification";
+import { documentFilename } from "../lib/imageExport";
 import { verificationUrl } from "../lib/url";
 import { logoDataUrl } from "../mappers";
-import type { ReceiptWithRelations } from "../mappers";
+import type { InvoiceWithRelations, ReceiptWithRelations } from "../mappers";
 import { num } from "../mappers";
 
 export const publicRouter = Router();
@@ -43,6 +47,36 @@ async function resolveReceipt(token: string) {
   if (!business) throw notFound("Business");
 
   return { receipt, business, expiresAt: verification.expiresAt };
+}
+
+/** The invoice equivalent of `resolveReceipt`. Same capability-token rules. */
+async function resolveInvoice(token: string) {
+  const verification = verifyShareToken(token);
+  if (!verification.ok) {
+    const message =
+      verification.reason === "expired"
+        ? "This share link has expired. Ask the sender for a new one."
+        : "This share link is invalid.";
+    const code = verification.reason === "expired" ? "LINK_EXPIRED" : "LINK_INVALID";
+    throw new AppError(message, 403, code);
+  }
+
+  const invoice = await prisma.invoice.findUnique({
+    where: { id: verification.receiptId },
+    include: {
+      items: { orderBy: { position: "asc" as const } },
+      payments: { orderBy: { paid_at: "asc" as const } },
+      customer: true,
+    },
+  });
+  if (!invoice) throw notFound("Invoice");
+
+  const business = await prisma.business.findFirst({
+    where: { id: invoice.business_id },
+  });
+  if (!business) throw notFound("Business");
+
+  return { invoice: invoice as InvoiceWithRelations, business, expiresAt: verification.expiresAt };
 }
 
 /** Strip internal fields — a share link must not leak tenancy metadata. */
@@ -242,5 +276,54 @@ publicRouter.post(
     );
     res.setHeader("Content-Type", "application/pdf");
     res.send(buffer);
+  }),
+);
+
+/* --------------------------- Public invoice links ------------------------- */
+
+/**
+ * An expiring capability link to an invoice document.
+ *
+ * Everything here is anonymous by design — the token *is* the authorisation —
+ * and everything is scoped to the one invoice it names. The organization's
+ * branding and the watermark travel with it, so a customer opening the link
+ * sees the document the issuer actually produced.
+ */
+publicRouter.get(
+  "/invoices/:token",
+  asyncH(async (req, res) => {
+    const { invoice, business, expiresAt } = await resolveInvoice(pathParam(req, "token"));
+
+    res.setHeader("Cache-Control", "private, no-store");
+    res.status(200).type("html").send(renderInvoiceHtml(await buildInvoiceDocumentData(invoice, business)));
+    void expiresAt;
+  }),
+);
+
+publicRouter.get(
+  "/invoices/:token/document",
+  asyncH(async (req, res) => {
+    const { invoice, business } = await resolveInvoice(pathParam(req, "token"));
+    res.setHeader("Cache-Control", "private, no-store");
+    res.status(200).type("html").send(renderInvoiceHtml(await buildInvoiceDocumentData(invoice, business)));
+  }),
+);
+
+/** Anonymous invoice PDF through the capability link. */
+publicRouter.get(
+  "/invoices/:token/download",
+  asyncH(async (req, res) => {
+    const { invoice, business } = await resolveInvoice(pathParam(req, "token"));
+    const buffer = await getOrCreateInvoicePdf(invoice, business);
+
+    res
+      .status(200)
+      .setHeader("Content-Type", "application/pdf")
+      .setHeader(
+        "Content-Disposition",
+        `attachment; filename="${documentFilename("invoice", invoice.invoice_number, "pdf")}"`,
+      )
+      .setHeader("Cache-Control", "private, max-age=0, must-revalidate")
+      .send(buffer);
   }),
 );

@@ -1,11 +1,24 @@
-import type { Business, Customer, Receipt, ReceiptItem, User } from "@prisma/client";
+import type {
+  Business,
+  Customer,
+  Invoice,
+  InvoiceItem,
+  InvoicePayment,
+  Receipt,
+  ReceiptItem,
+  User,
+} from "@prisma/client";
 import type {
   BusinessDTO,
   CustomerDTO,
+  InvoiceDTO,
+  InvoiceItemDTO,
+  InvoicePaymentDTO,
   ReceiptDTO,
   ReceiptItemDTO,
   UserDTO,
 } from "@eleos/shared";
+import { outstandingBalance } from "@eleos/shared";
 import { getStorage } from "./lib/storage";
 
 /** Prisma Decimal → plain number, safely. */
@@ -47,6 +60,9 @@ export async function toBusinessDTO(business: Business): Promise<BusinessDTO> {
     brand_primary: business.brand_primary,
     brand_accent: business.brand_accent,
     number_prefix: business.number_prefix,
+    watermark_enabled: business.watermark_enabled,
+    watermark_text: business.watermark_text,
+    watermark_opacity: business.watermark_opacity,
     created_at: business.created_at.toISOString(),
     updated_at: business.updated_at.toISOString(),
   };
@@ -95,6 +111,8 @@ export async function toReceiptDTO(receipt: ReceiptWithRelations): Promise<Recei
         }
       : null,
     receipt_number: receipt.receipt_number,
+    source: receipt.source,
+    invoice_payment_id: receipt.invoice_payment_id,
     issue_date: receipt.issue_date.toISOString(),
     subtotal: num(receipt.subtotal),
     discount: num(receipt.discount),
@@ -122,6 +140,96 @@ export async function toReceiptDTOs(
   receipts: ReceiptWithRelations[],
 ): Promise<ReceiptDTO[]> {
   return Promise.all(receipts.map(toReceiptDTO));
+}
+
+/* --------------------------------- Invoicing ----------------------------- */
+
+export function toInvoiceItemDTO(item: InvoiceItem): InvoiceItemDTO {
+  return {
+    id: item.id,
+    position: item.position,
+    description: item.description,
+    quantity: num(item.quantity),
+    unit_price: num(item.unit_price),
+    line_total: num(item.line_total),
+  };
+}
+
+export function toInvoicePaymentDTO(payment: InvoicePayment): InvoicePaymentDTO {
+  return {
+    id: payment.id,
+    invoice_id: payment.invoice_id,
+    amount: num(payment.amount),
+    paid_at: payment.paid_at.toISOString(),
+    method: payment.method,
+    reference: payment.reference,
+    notes: payment.notes,
+    // Resolved by the relation the caller includes; absent on a bare row.
+    receipt_id: (payment as InvoicePayment & { receipt?: { id: string } | null }).receipt?.id ?? null,
+    created_by: payment.created_by,
+    created_at: payment.created_at.toISOString(),
+  };
+}
+
+export type InvoiceWithRelations = Invoice & {
+  items: InvoiceItem[];
+  payments: InvoicePayment[];
+  customer: Customer | null;
+};
+
+/**
+ * `balance_due` is computed here from the stored totals, never taken from a
+ * request body — the number a customer is shown as owing is derived, on the
+ * server, from money that was itself validated on the way in.
+ */
+export function toInvoiceDTO(invoice: InvoiceWithRelations): InvoiceDTO {
+  const total = num(invoice.total);
+  const amountPaid = num(invoice.amount_paid);
+
+  return {
+    id: invoice.id,
+    business_id: invoice.business_id,
+    customer_id: invoice.customer_id,
+    customer: invoice.customer
+      ? {
+          id: invoice.customer.id,
+          name: invoice.customer.name,
+          phone: invoice.customer.phone,
+          email: invoice.customer.email,
+        }
+      : null,
+    invoice_number: invoice.invoice_number,
+    issue_date: invoice.issue_date.toISOString(),
+    due_date: invoice.due_date ? invoice.due_date.toISOString() : null,
+    subtotal: num(invoice.subtotal),
+    discount: num(invoice.discount),
+    tax: num(invoice.tax),
+    tax_rate: num(invoice.tax_rate),
+    total,
+    amount_paid: amountPaid,
+    balance_due: outstandingBalance(total, amountPaid),
+    status: invoice.status,
+    notes: invoice.notes,
+    terms: invoice.terms,
+    po_reference: invoice.po_reference,
+    pdf_url: null,
+    issued_at: invoice.issued_at ? invoice.issued_at.toISOString() : null,
+    cancelled_at: invoice.cancelled_at ? invoice.cancelled_at.toISOString() : null,
+    cancel_reason: invoice.cancel_reason,
+    created_by: invoice.created_by,
+    created_at: invoice.created_at.toISOString(),
+    items: invoice.items.map(toInvoiceItemDTO),
+    payments: invoice.payments.map(toInvoicePaymentDTO),
+  };
+}
+
+/** As above, but resolves the stored PDF key into a signed URL. */
+export async function toInvoiceDTOWithPdf(
+  invoice: InvoiceWithRelations,
+): Promise<InvoiceDTO> {
+  const dto = toInvoiceDTO(invoice);
+  if (!invoice.pdf_url) return dto;
+  return { ...dto, pdf_url: await getStorage().url(invoice.pdf_url, 60 * 60) };
 }
 
 /** Load the business logo as an inline data URL for the document renderer. */

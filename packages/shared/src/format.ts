@@ -43,3 +43,15 @@ export function formatReceiptNumber(prefix: string, sequence: number): string {
   const safePrefix = (prefix || "ES").toUpperCase().replace(/[^A-Z0-9]/g, "");
   return `${safePrefix}-${String(sequence).padStart(6, "0")}`;
 }
+
+/**
+ * `214` → `INV-000214`
+ *
+ * Invoices get a fixed prefix rather than the organization's receipt prefix:
+ * a business may have configured `ES` because that is what their sales slips
+ * have always said, and an invoice carrying that same prefix would be
+ * indistinguishable from a receipt once the two are in the same pile.
+ */
+export function formatInvoiceNumber(sequence: number): string {
+  return formatReceiptNumber("INV", sequence);
+}

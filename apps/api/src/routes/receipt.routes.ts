@@ -16,6 +16,7 @@ import { nextReceiptNumber } from "../lib/receiptNumber";
 import { ensureReceiptPdf } from "../lib/pdfStore";
 import { buildDocumentData } from "../lib/documentData";
 import { renderReceiptHtml } from "../lib/document";
+import { renderReceiptPng, documentFilename } from "../lib/imageExport";
 import { logoDataUrl } from "../mappers";
 import { formatReceiptNumber } from "@eleos/shared";
 import { signShareToken } from "../lib/tokens";
@@ -258,6 +259,11 @@ receiptRouter.post(
         brand_accent: business.brand_accent,
       },
       logo_data_url: logo,
+      watermark: {
+        enabled: business.watermark_enabled,
+        text: business.watermark_text,
+        opacity: business.watermark_opacity,
+      },
       receipt: {
         receipt_number: previewNumber,
         issue_date: input.issue_date
@@ -313,6 +319,28 @@ receiptRouter.get(
   }),
 );
 
+/** High-quality PNG of the same document the PDF is built from. */
+receiptRouter.get(
+  "/:id/image",
+  asyncH(async (req, res) => {
+    const businessId = req.auth!.businessId;
+    const receipt = await loadReceipt(businessId, pathParam(req, "id"));
+    const business = await loadBusinessFor(businessId);
+
+    const buffer = await renderReceiptPng(await buildDocumentData(receipt, business, null));
+
+    res
+      .status(200)
+      .setHeader("Content-Type", "image/png")
+      .setHeader(
+        "Content-Disposition",
+        `attachment; filename="${documentFilename("receipt", receipt.receipt_number, "png")}"`,
+      )
+      .setHeader("Cache-Control", "private, max-age=0, must-revalidate")
+      .send(buffer);
+  }),
+);
+
 /** Streams the branded PDF for this receipt (generates it on first request). */
 receiptRouter.get(
   "/:id/pdf",
@@ -321,7 +349,7 @@ receiptRouter.get(
     const receipt = await loadReceipt(businessId, pathParam(req, "id"));
 
     const { buffer } = await ensurePdf(receipt, businessId, verificationUrl(req, receipt.id));
-    const filename = `${receipt.receipt_number}.pdf`;
+    const filename = documentFilename("receipt", receipt.receipt_number, "pdf");
 
     res
       .status(200)

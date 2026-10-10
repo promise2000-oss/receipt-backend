@@ -42,14 +42,19 @@ holding the printout see an identical document.
 | # | Feature | Endpoint |
 |---|---------|----------|
 | 1 | Email + password sign-in, JWT in an `httpOnly` cookie, sign-up creates business + owner atomically | `POST /api/auth/login` · `/signup` |
-| 2 | Business settings: name, contact details, logo upload, brand colours, currency, receipt number prefix | `GET`/`PATCH /api/business` · `/logo` |
+| 2 | Business settings: name, contact details, logo upload, brand colours, currency, receipt number prefix, **document watermark** | `GET`/`PATCH /api/business` · `/logo` |
 | 3 | Customers: create, edit, search, delete, receipts-per-customer count | `/api/customers` |
 | 4 | Receipts with line items and per-business gap-free sequential numbers (`ES-0000214`); totals computed server-side | `POST /api/receipts` |
-| 5 | Branded PDF: black header band + logo, cream body, itemised table, gold total row, gold frame, footer disclaimer | `GET /api/receipts/:id/pdf` |
-| 6 | Share: expiring signed link to a standalone receipt page, plus PDF download | `GET /api/public/r/:token/document` · `/download` |
-| 7 | History: search + status/period/amount filters | `GET /api/receipts` |
-| 8 | Void + reissue: voided receipts are retained and marked, reissue creates a linked replacement with a fresh number | `POST /api/receipts/:id/void` · `/reissue` |
-| 9 | Dashboard figures: Today / This Week / This Month + recent receipts | `GET /api/dashboard/summary` |
+| 5 | **Invoices**: draft → issued → partially paid → paid, with cancel, due dates, terms, PO references and a frozen issue-time snapshot | `GET/POST /api/invoices` · `PATCH /api/invoices/:id` |
+| 6 | **Payments**: multiple payments per invoice, overpayment refused, balance and status derived server-side | `POST /api/invoices/:id/payments` |
+| 7 | **Payment receipts**: a receipt generated in the same transaction as the payment, for the amount actually received | (automatic) |
+| 8 | **Document watermark**: `VISIONARYGENE` painted into the PDF/PNG template, repeated on every page, per-organization | `PATCH /api/business` |
+| 9 | **Exports**: branded PDF and high-quality PNG for both receipts and invoices | `GET /api/{receipts,invoices}/:id/{pdf,image}` |
+| 10 | Share: expiring signed link to a standalone document page, plus PDF download | `/api/public/r/:token/document` · `/api/public/invoices/:token/document` |
+| 11 | History: search + status/period/amount filters | `GET /api/receipts` |
+| 12 | Void + reissue: voided receipts are retained and marked, reissue creates a linked replacement with a fresh number | `POST /api/receipts/:id/void` · `/reissue` |
+| 13 | Invoice analytics: invoiced / received / outstanding / overdue, all real aggregates | `GET /api/invoices/summary` |
+| 14 | Dashboard figures: Today / This Week / This Month + recent receipts | `GET /api/dashboard/summary` |
 
 ## Stack
 
@@ -235,8 +240,11 @@ asserts the rules the product depends on:
 - **Auth** — uniform login failure, bcrypt hashing, tampered cookies rejected
 - **Tenancy** — cross-tenant reads resolve to `404`, lists are scoped
 - **Immutability** — money fields cannot be edited at the ORM boundary or over HTTP; void + reissue are the only legal corrections
+- **Invoicing** — the lifecycle, drafts-vs-issued editing, overpayment refusal, per-tenant numbering, real aggregates
+- **Payments** — partial payments, the outstanding balance, exactly one receipt per payment, and a concurrency test that fires ten simultaneous payments at one invoice
+- **Watermark** — the exact brand spelling, rotation and opacity; on-screen and in print; per-tenant configuration; and a PDF test that decompresses every page's content stream to prove the mark lands on **all** pages, not just the first
 - **Numbering** — 15 concurrent creates produce unique, contiguous receipt numbers
-- **Validation** — server-side totals, empty/negative line items rejected
+- **Validation** — server-side totals, empty/negative line items rejected, due-date-before-issue-date rejected
 - **Share links** — signing, tamper, expiry, payload redaction
 - **Documents** — brand colours present, user input HTML-escaped
 - **Settings & customers** — validation, isolation, empty-string handling
@@ -277,17 +285,37 @@ client ──► Express (:4000) ──► Prisma ──► PostgreSQL
    that touch them are rejected with `409 RECEIPT_IMMUTABLE`. Corrections are
    made by **voiding and reissuing** — voided receipts are never deleted, and a
    reissue links back through `original_receipt_id`.
-2. **Everything is scoped by `business_id`.** Another tenant's receipt,
-   customer or logo is simply "not found".
-3. **Receipt numbers are unique and sequential per business**, allocated by
-   incrementing `business.receipt_counter` inside the same transaction as the
-   insert, backed by `UNIQUE (business_id, receipt_number)` — concurrent
-   creates cannot collide or skip.
-4. **Totals are computed on the server.** Client-supplied `subtotal`, `tax`,
+2. **An invoice is editable only while it is a `draft`.** Issuing freezes the
+   same fields (`409 INVOICE_IMMUTABLE`), *except* `amount_paid` and `status`,
+   which a recorded payment is supposed to move. The rule is enforced in the
+   Prisma client extension, not in a route handler, so a future endpoint cannot
+   quietly break it.
+3. **Creating an invoice never marks it paid.** `draft → issued` assigns the
+   number and freezes the figures; money only moves when a payment is recorded.
+4. **A payment and its receipt are written in one transaction.** The invoice
+   row is re-read under lock, the amount is checked against *that* balance, and
+   an overpayment is refused rather than clamped. `receipts.invoice_payment_id`
+   is `UNIQUE`, so a duplicated receipt is impossible even under concurrency.
+5. **Partial payments are first-class.** Ten concurrent ₦10,000 payments
+   against a ₦100,000 invoice settle it exactly once — no overspend, no missing
+   receipt. There is a test that runs exactly that race.
+6. **Everything is scoped by `business_id`.** Another tenant's invoice,
+   receipt, payment, document or logo is simply "not found" — `404`, never
+   `403`, so the API never confirms that someone else's record exists.
+7. **Receipt and invoice numbers are unique and sequential per business**,
+   allocated by incrementing a counter inside the same transaction as the
+   insert and backed by a `UNIQUE (business_id, …_number)` index. The two
+   series use independent counters.
+8. **Totals are computed on the server.** Client-supplied `subtotal`, `tax`,
    `total` and `paid_amount` are ignored/clamped; `computeTotals()` is the one
-   source of truth.
-5. **No password, no secret, no internal id ever leaves the API** in a public
-   payload.
+   source of truth, and `balance_due` is derived, never accepted.
+9. **The watermark is part of the document.** `VISIONARYGENE` is painted into
+   the HTML Puppeteer turns into a PDF, behind the content, and repeats on every
+   page of a multi-page document. Tenants may re-word or disable it; the
+   opacity is clamped server-side so no setting can make a document unreadable.
+10. **No password, no secret, no internal id ever leaves the API** in a public
+    payload. Export filenames are namespaced by document, never by
+    organization, so one tenant's name can never appear in another's download.
 
 ## API
 
@@ -299,20 +327,30 @@ the session cookie.
 | POST | `/auth/signup` | Create business + owner |
 | POST | `/auth/login` · `/auth/logout` | Session |
 | GET | `/auth/me` | Current user + business |
-| GET | `/business` · PATCH `/business` | Read/update settings |
+| GET | `/business` · PATCH `/business` | Read/update settings (watermark is owner-only) |
 | POST | `/business/logo` · DELETE `/business/logo` | Upload/remove logo |
 | GET/POST | `/customers` · GET/PATCH/DELETE `/customers/:id` | Customer CRUD (+ search, count) |
 | GET/POST | `/receipts` | List (search/filter) · create |
 | POST | `/receipts/preview` | Render HTML for the builder preview |
 | GET | `/receipts/:id` | Receipt with items + customer |
 | GET | `/receipts/:id/document` | Raw receipt HTML |
-| GET | `/receipts/:id/pdf` | Render + return the PDF |
+| GET | `/receipts/:id/pdf` · `/image` | Branded PDF · high-quality PNG |
 | POST | `/receipts/:id/generate-pdf` | Render, store, return a signed URL |
 | POST | `/receipts/:id/void` · `/reissue` | Corrections |
 | GET/POST | `/receipts/:id/share` | Signed link |
 | POST | `/receipts/:id/email` | Email with PDF attachment |
+| GET | `/invoices` · `/invoices/summary` | List (search/filter) · analytics |
+| POST | `/invoices` · `/invoices/preview` | Create (draft or issued) · render HTML |
+| GET | `/invoices/:id` · `/invoices/:id/payments` | Invoice with items + payments |
+| PATCH | `/invoices/:id` | Edit a **draft** (issued → `409`) |
+| POST | `/invoices/:id/issue` · `/cancel` | Lifecycle transitions |
+| POST | `/invoices/:id/payments` | Record a payment (generates its receipt) |
+| GET | `/invoices/:id/document` · `/pdf` · `/image` | HTML · branded PDF · high-quality PNG |
+| POST | `/invoices/:id/generate-pdf` | Render and store the PDF |
+| GET/POST | `/invoices/:id/share` | Signed link |
 | GET | `/dashboard/summary` | Today / week / month figures |
-| GET | `/public/r/:token` · `/document` · `/download` · POST `/regenerate` | Public share |
+| GET | `/public/r/:token` · `/document` · `/download` · POST `/regenerate` | Public receipt share |
+| GET | `/public/invoices/:token` · `/document` · `/download` | Public invoice share |
 | GET | `/files/:token` | HMAC-signed private file |
 | GET | `/docs` · `/docs/openapi.json` | Swagger UI · raw OpenAPI 3.1 document |
 | GET | `/health` | Liveness |
@@ -358,13 +396,16 @@ Express (a route rename that leaves the docs behind fails the suite).
 ```
 apps/
   api/          Express + Prisma + Puppeteer
-    src/lib/    env, prisma (tenant guard), document (receipt HTML), pdf, storage, tokens, mail
+    src/lib/    env, prisma (tenant guard), document (receipt HTML),
+                invoiceDocument (invoice HTML), watermark, pdf, imageExport,
+                storage, tokens, mail
     src/openapi/ OpenAPI document (schemas, paths) + the Swagger UI route
-    src/routes/ auth, business, customers, receipts, dashboard, public, files
+    src/routes/ auth, business, customers, receipts, invoices, dashboard,
+                public, files
     prisma/     schema, migrations, seed
     tests/      vitest business-rule + documentation suites
 packages/
-  shared/       Zod schemas, money maths, enums, DTO types
+  shared/       Zod schemas, money maths, enums, DTO types, watermark config
 Dockerfile          single-container image (API + Chromium) for Render
 render.yaml         Render Blueprint: one web service + managed Postgres
 docker-compose.yml  local Postgres + API
