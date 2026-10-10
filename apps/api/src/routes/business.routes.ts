@@ -5,6 +5,7 @@ import { prisma } from "../lib/prisma";
 import { AppError, notFound } from "../lib/errors";
 import { asyncH, parse } from "../middleware/validate";
 import { requireAuth, requireOwner } from "../middleware/requireAuth";
+import { record, AUDIT_ACTIONS } from "../lib/audit";
 import { logoKey, getStorage } from "../lib/storage";
 import { assertLogoDimensions } from "../lib/image";
 import { toBusinessDTO } from "../mappers";
@@ -53,6 +54,55 @@ businessRouter.patch(
       where: { id: req.auth!.businessId },
       data,
     });
+
+    // A branding or watermark change is recorded separately from a plain
+    // details edit: it changes what every future document looks like, which is
+    // exactly the kind of event an owner needs to be able to find later.
+    const BRANDING_FIELDS = ["brand_primary", "brand_accent"] as const;
+    const WATERMARK_FIELDS = [
+      "watermark_enabled",
+      "watermark_text",
+      "watermark_opacity",
+    ] as const;
+
+    const touched = Object.keys(data);
+    const branding = touched.filter((f) =>
+      (BRANDING_FIELDS as readonly string[]).includes(f),
+    );
+    const watermark = touched.filter((f) =>
+      (WATERMARK_FIELDS as readonly string[]).includes(f),
+    );
+
+    await record({
+      businessId: req.auth!.businessId,
+      actorId: req.auth!.userId,
+      action: AUDIT_ACTIONS.orgUpdated,
+      resourceType: "business",
+      resourceId: req.auth!.businessId,
+      metadata: { fields: touched },
+    });
+
+    if (branding.length > 0) {
+      await record({
+        businessId: req.auth!.businessId,
+        actorId: req.auth!.userId,
+        action: AUDIT_ACTIONS.orgBrandingChanged,
+        resourceType: "business",
+        resourceId: req.auth!.businessId,
+        metadata: { fields: branding },
+      });
+    }
+
+    if (watermark.length > 0) {
+      await record({
+        businessId: req.auth!.businessId,
+        actorId: req.auth!.userId,
+        action: AUDIT_ACTIONS.orgWatermarkChanged,
+        resourceType: "business",
+        resourceId: req.auth!.businessId,
+        metadata: { fields: watermark },
+      });
+    }
 
     res.json(await toBusinessDTO(business));
   }),

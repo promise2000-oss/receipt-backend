@@ -44,6 +44,10 @@ holding the printout see an identical document.
 | 1 | Email + password sign-in, JWT in an `httpOnly` cookie, sign-up creates business + owner atomically | `POST /api/auth/login` · `/signup` |
 | 2 | Business settings: name, contact details, logo upload, brand colours, currency, receipt number prefix, **document watermark** | `GET`/`PATCH /api/business` · `/logo` |
 | 3 | Customers: create, edit, search, delete, receipts-per-customer count | `/api/customers` |
+| 3a | **Roles**: `owner` / `admin` / `staff` / `viewer`, one permission matrix enforced per request | (guards) |
+| 3b | **Invitations**: hashed single-use tokens, 72h expiry, revoke, atomic redemption | `/api/team/invitations` |
+| 3c | **Team management**: list members, change role, remove — subject to rank and last-owner rules | `/api/team` |
+| 3d | **Audit log**: append-only, tenant-scoped, read-only by construction | `GET /api/audit` |
 | 4 | Receipts with line items and per-business gap-free sequential numbers (`ES-0000214`); totals computed server-side | `POST /api/receipts` |
 | 5 | **Invoices**: draft → issued → partially paid → paid, with cancel, due dates, terms, PO references and a frozen issue-time snapshot | `GET/POST /api/invoices` · `PATCH /api/invoices/:id` |
 | 6 | **Payments**: multiple payments per invoice, overpayment refused, balance and status derived server-side | `POST /api/invoices/:id/payments` |
@@ -239,6 +243,10 @@ asserts the rules the product depends on:
 
 - **Auth** — uniform login failure, bcrypt hashing, tampered cookies rejected
 - **Tenancy** — cross-tenant reads resolve to `404`, lists are scoped
+- **Roles** — the matrix itself, plus per-role enforcement over HTTP: a viewer can read and write nothing, a staff member cannot administer the organization, and a role in the request body never overrides the one in the session
+- **Invitations** — creation, the one-time token, wrong-email refusal, expiry, revocation, single use, and three concurrent redemptions of one token producing exactly one member
+- **Rank rules** — an admin cannot demote or remove an owner, nobody can change their own role, and the last owner cannot be stepped down
+- **Audit** — events are recorded with actor and resource, scoped to one tenant, free of secrets, and unmodifiable
 - **Immutability** — money fields cannot be edited at the ORM boundary or over HTTP; void + reissue are the only legal corrections
 - **Invoicing** — the lifecycle, drafts-vs-issued editing, overpayment refusal, per-tenant numbering, real aggregates
 - **Payments** — partial payments, the outstanding balance, exactly one receipt per payment, and a concurrency test that fires ten simultaneous payments at one invoice
@@ -313,7 +321,18 @@ client ──► Express (:4000) ──► Prisma ──► PostgreSQL
    the HTML Puppeteer turns into a PDF, behind the content, and repeats on every
    page of a multi-page document. Tenants may re-word or disable it; the
    opacity is clamped server-side so no setting can make a document unreadable.
-10. **No password, no secret, no internal id ever leaves the API** in a public
+10. **Authorization is the role in the signed session, and nothing else.** A
+    `staff` member posting `role: "owner"` changes nothing, because the guard
+    reads the token. On top of that, a role may only be granted or revoked
+    against somebody *below* the actor's rank, so nobody can promote themselves
+    — and the organization can never be left without an owner.
+11. **The audit log is append-only and tenant-scoped.** Only `GET /api/audit`
+    exists; there is no verb anywhere in the API that can modify or delete an
+    entry. Metadata records what changed, never a secret or customer detail.
+12. **Invitation tokens are stored hashed** (SHA-256 of 32 random bytes), are
+    single-use, and expire. A leaked database row yields nothing, and two
+    simultaneous redemptions produce exactly one member.
+13. **No password, no secret, no internal id ever leaves the API** in a public
     payload. Export filenames are namespaced by document, never by
     organization, so one tenant's name can never appear in another's download.
 
@@ -348,6 +367,10 @@ the session cookie.
 | GET | `/invoices/:id/document` · `/pdf` · `/image` | HTML · branded PDF · high-quality PNG |
 | POST | `/invoices/:id/generate-pdf` | Render and store the PDF |
 | GET/POST | `/invoices/:id/share` | Signed link |
+| GET | `/team` · POST `/team/invitations` · DELETE `/team/invitations/:id` | Members · invite · revoke |
+| POST | `/team/invitations/accept` | Redeem an invitation (no session) |
+| PATCH | `/team/:id/role` · DELETE `/team/:id` | Change role · remove member |
+| GET | `/audit` | Audit trail (read-only; no mutating route exists) |
 | GET | `/dashboard/summary` | Today / week / month figures |
 | GET | `/public/r/:token` · `/document` · `/download` · POST `/regenerate` | Public receipt share |
 | GET | `/public/invoices/:token` · `/document` · `/download` | Public invoice share |
@@ -400,12 +423,13 @@ apps/
                 invoiceDocument (invoice HTML), watermark, pdf, imageExport,
                 storage, tokens, mail
     src/openapi/ OpenAPI document (schemas, paths) + the Swagger UI route
-    src/routes/ auth, business, customers, receipts, invoices, dashboard,
-                public, files
+    src/routes/ auth, business, customers, receipts, invoices, team, audit,
+                dashboard, public, files
     prisma/     schema, migrations, seed
     tests/      vitest business-rule + documentation suites
 packages/
-  shared/       Zod schemas, money maths, enums, DTO types, watermark config
+  shared/       Zod schemas, money maths, enums, DTO types, watermark config,
+                RBAC matrix
 Dockerfile          single-container image (API + Chromium) for Render
 render.yaml         Render Blueprint: one web service + managed Postgres
 docker-compose.yml  local Postgres + API

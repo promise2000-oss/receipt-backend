@@ -3,7 +3,7 @@ import { customerSchema } from "@eleos/shared";
 import { prisma } from "../lib/prisma";
 import { AppError, notFound } from "../lib/errors";
 import { asyncH, parse, pathParam } from "../middleware/validate";
-import { requireAuth } from "../middleware/requireAuth";
+import { requireAuth, requirePermission } from "../middleware/requireAuth";
 import { toCustomerDTO } from "../mappers";
 
 export const customerRouter = Router();
@@ -47,8 +47,15 @@ customerRouter.get(
   }),
 );
 
+/**
+ * Read access is granted to every role; writes are not.
+ *
+ * A `viewer` can look up a customer's receipt history — which is the point of
+ * giving them read access — but cannot create, rename or delete one.
+ */
 customerRouter.post(
   "/",
+  requirePermission("customer.create"),
   asyncH(async (req, res) => {
     const input = parse(customerSchema, req.body);
 
@@ -67,6 +74,7 @@ customerRouter.post(
 
 customerRouter.patch(
   "/:id",
+  requirePermission("customer.update"),
   asyncH(async (req, res) => {
     const input = parse(customerSchema, req.body);
 
@@ -90,6 +98,7 @@ customerRouter.patch(
 
 customerRouter.delete(
   "/:id",
+  requirePermission("customer.delete"),
   asyncH(async (req, res) => {
     const existing = await prisma.customer.findFirst({
       where: { id: pathParam(req, "id"), business_id: req.auth!.businessId },

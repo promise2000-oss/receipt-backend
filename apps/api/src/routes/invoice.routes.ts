@@ -16,8 +16,9 @@ import {
 import { prisma } from "../lib/prisma";
 import { AppError, conflict, notFound } from "../lib/errors";
 import { asyncH, parse, pathParam } from "../middleware/validate";
-import { requireAuth } from "../middleware/requireAuth";
+import { requireAuth, requirePermission } from "../middleware/requireAuth";
 import { nextInvoiceNumber, nextReceiptNumber } from "../lib/receiptNumber";
+import { record, AUDIT_ACTIONS } from "../lib/audit";
 import { ensureInvoicePdf, getOrCreateInvoicePdf } from "../lib/invoicePdfStore";
 import { buildInvoiceDocumentData } from "../lib/invoiceDocumentData";
 import { renderInvoiceHtml } from "../lib/invoiceDocument";
@@ -227,6 +228,7 @@ invoiceRouter.get(
 
 invoiceRouter.post(
   "/",
+  requirePermission("invoice.create"),
   asyncH(async (req, res) => {
     const businessId = req.auth!.businessId;
     const input = parse(invoiceCreateSchema, req.body);
@@ -281,6 +283,19 @@ invoiceRouter.post(
         },
         include: INVOICE_INCLUDE,
       });
+    });
+
+    await record({
+      businessId,
+      actorId: req.auth!.userId,
+      action: AUDIT_ACTIONS.invoiceCreated,
+      resourceType: "invoice",
+      resourceId: invoice.id,
+      metadata: {
+        invoice_number: invoice.invoice_number,
+        total: totals.total,
+        issued: input.issue,
+      },
     });
 
     res.status(201).json(await toInvoiceDTOWithPdf(invoice));
@@ -386,6 +401,7 @@ invoiceRouter.get(
 
 invoiceRouter.patch(
   "/:id",
+  requirePermission("invoice.update"),
   asyncH(async (req, res) => {
     const businessId = req.auth!.businessId;
     const input = parse(invoiceUpdateSchema, req.body);
@@ -457,6 +473,7 @@ invoiceRouter.patch(
 
 invoiceRouter.post(
   "/:id/issue",
+  requirePermission("invoice.issue"),
   asyncH(async (req, res) => {
     const businessId = req.auth!.businessId;
     const invoice = await loadInvoice(businessId, pathParam(req, "id"));
@@ -506,12 +523,22 @@ invoiceRouter.post(
       include: INVOICE_INCLUDE,
     });
 
+    await record({
+      businessId,
+      actorId: req.auth!.userId,
+      action: AUDIT_ACTIONS.invoiceIssued,
+      resourceType: "invoice",
+      resourceId: issued.id,
+      metadata: { invoice_number: issued.invoice_number, total: num(issued.total) },
+    });
+
     res.json(await toInvoiceDTOWithPdf(issued));
   }),
 );
 
 invoiceRouter.post(
   "/:id/cancel",
+  requirePermission("invoice.cancel"),
   asyncH(async (req, res) => {
     const businessId = req.auth!.businessId;
     const input = parse(invoiceCancelSchema, req.body);
@@ -535,6 +562,18 @@ invoiceRouter.post(
         cancel_reason: input.reason,
       },
       include: INVOICE_INCLUDE,
+    });
+
+    await record({
+      businessId,
+      actorId: req.auth!.userId,
+      action: AUDIT_ACTIONS.invoiceCancelled,
+      resourceType: "invoice",
+      resourceId: cancelled.id,
+      metadata: {
+        invoice_number: cancelled.invoice_number,
+        reason: input.reason,
+      },
     });
 
     res.json(await toInvoiceDTOWithPdf(cancelled));
@@ -589,6 +628,7 @@ invoiceRouter.get(
  */
 invoiceRouter.post(
   "/:id/payments",
+  requirePermission("invoice.recordPayment"),
   asyncH(async (req, res) => {
     const businessId = req.auth!.businessId;
     const userId = req.auth!.userId;
@@ -720,6 +760,22 @@ invoiceRouter.post(
       });
       if (found) receipt = await toReceiptDTO(found);
     }
+
+    await record({
+      businessId,
+      actorId: req.auth!.userId,
+      action: AUDIT_ACTIONS.paymentRecorded,
+      resourceType: "invoice",
+      resourceId: invoice.id,
+      metadata: {
+        invoice_number: invoice.invoice_number,
+        payment_id: result.payment.id,
+        amount: num(result.payment.amount),
+        method: result.payment.method,
+        receipt_id: result.receiptId,
+        balance_after: result.balanceAfter,
+      },
+    });
 
     res.status(201).json({
       payment: {

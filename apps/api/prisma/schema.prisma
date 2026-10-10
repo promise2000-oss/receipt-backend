@@ -25,9 +25,17 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+/// Membership role. See `@eleos/shared#rbac` for the permission matrix that
+/// turns this into an authorization decision — the enum itself is only the
+/// label, and the matrix is the rule.
+///
+/// `owner` and `staff` keep their pre-RBAC meaning exactly, so the migration
+/// below is additive and existing rows keep their access.
 enum Role {
   owner
+  admin
   staff
+  viewer
 }
 
 enum PaymentMethod {
@@ -105,6 +113,8 @@ model Business {
   receipts   Receipt[]
   invoices   Invoice[]
   invoice_payments InvoicePayment[]
+  invitations Invitation[]
+  audit_events AuditEvent[]
 
   @@map("businesses")
 }
@@ -123,6 +133,10 @@ model User {
   receipts      Receipt[]
   invoices      Invoice[]
   invoice_payments InvoicePayment[]
+  /// Invitations this person sent.
+  sent_invitations Invitation[] @relation("InvitedBy")
+  /// Audit entries this person produced.
+  audit_events  AuditEvent[]
 
   @@index([business_id])
   @@map("users")
@@ -320,4 +334,68 @@ model InvoicePayment {
   @@index([business_id, created_at])
   @@index([invoice_id, paid_at])
   @@map("invoice_payments")
+}
+
+/// A pending invitation to join one organization.
+///
+/// The token is the authorisation: it is random, stored only as a SHA-256
+/// hash, single-use, and expires. An invitee therefore proves nothing about
+/// who they are until they redeem it, and a leaked database row is useless
+/// because the plaintext token never existed in it.
+model Invitation {
+  id           String   @id @default(uuid())
+  business_id  String
+  email        String
+  /// The role the invitee will hold if they accept. Capped at `admin` at the
+  /// route boundary — inviting an owner is an ownership transfer, not an invite.
+  role         Role     @default(staff)
+  /// SHA-256 of the token. The plaintext is returned exactly once, at creation.
+  token_hash   String   @unique
+  invited_by   String
+  expires_at   DateTime
+  /// `null` until the invite is used, then stamped with when.
+  accepted_at  DateTime?
+  /// Who redeemed it. Null while pending; set even if the account was later
+  /// removed, so the trail survives the person.
+  accepted_by  String?
+  revoked_at   DateTime?
+  created_at   DateTime @default(now())
+
+  business     Business @relation(fields: [business_id], references: [id], onDelete: Cascade)
+  invited_by_user User  @relation("InvitedBy", fields: [invited_by], references: [id], onDelete: Restrict)
+
+  @@unique([business_id, email])
+  @@index([business_id, created_at])
+  @@index([email])
+  @@map("invitations")
+}
+
+/// An append-only record of a significant business event.
+///
+/// Deliberately not a log table anyone may edit: rows are only ever inserted,
+/// there is no update or delete route anywhere in the API, and every query is
+/// filtered by `business_id` so one organization can never read another's
+/// trail. `metadata` holds change detail only — never a password, token or
+/// customer payment detail.
+model AuditEvent {
+  id           String   @id @default(uuid())
+  business_id  String
+  /// Null for system events that have no human actor (e.g. a scheduled sweep).
+  actor_id     String?
+  /// Dotted verb, e.g. `invoice.issue`. Kept as a string rather than an enum
+  /// so a new event can be recorded without a migration.
+  action       String
+  /// What it happened to: `invoice`, `receipt`, `user`, `business`…
+  resource_type String?
+  resource_id  String?
+  metadata     Json?
+  created_at   DateTime @default(now())
+
+  business     Business @relation(fields: [business_id], references: [id], onDelete: Cascade)
+  actor        User?    @relation(fields: [actor_id], references: [id], onDelete: SetNull)
+
+  @@index([business_id, created_at])
+  @@index([business_id, action])
+  @@index([resource_type, resource_id])
+  @@map("audit_events")
 }

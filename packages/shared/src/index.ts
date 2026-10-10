@@ -4,3 +4,4 @@ export * from "./enums";
 export * from "./format";
 export * from "./types";
 export * from "./schemas";
+export * from "./rbac";

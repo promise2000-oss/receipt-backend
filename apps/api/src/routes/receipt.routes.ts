@@ -11,8 +11,9 @@ import {
 import { prisma } from "../lib/prisma";
 import { AppError, conflict, notFound } from "../lib/errors";
 import { asyncH, parse, pathParam } from "../middleware/validate";
-import { requireAuth } from "../middleware/requireAuth";
+import { requireAuth, requirePermission } from "../middleware/requireAuth";
 import { nextReceiptNumber } from "../lib/receiptNumber";
+import { record, AUDIT_ACTIONS } from "../lib/audit";
 import { ensureReceiptPdf } from "../lib/pdfStore";
 import { buildDocumentData } from "../lib/documentData";
 import { renderReceiptHtml } from "../lib/document";
@@ -134,6 +135,7 @@ receiptRouter.get(
 
 receiptRouter.post(
   "/",
+  requirePermission("receipt.create"),
   asyncH(async (req, res) => {
     const businessId = req.auth!.businessId;
     const input = parse(receiptCreateSchema, req.body);
@@ -197,6 +199,17 @@ receiptRouter.post(
         },
         include: RECEIPT_INCLUDE,
       });
+    });
+
+    // Recorded after the transaction commits, so the audit row describes a
+    // receipt that genuinely exists rather than one that might roll back.
+    await record({
+      businessId,
+      actorId: req.auth!.userId,
+      action: AUDIT_ACTIONS.receiptCreated,
+      resourceType: "receipt",
+      resourceId: receipt.id,
+      metadata: { receipt_number: receipt.receipt_number, total: totals.total },
     });
 
     res.status(201).json(await toReceiptDTO(receipt));
@@ -378,6 +391,7 @@ receiptRouter.post(
 
 receiptRouter.post(
   "/:id/void",
+  requirePermission("receipt.void"),
   asyncH(async (req, res) => {
     const businessId = req.auth!.businessId;
     const input = parse(voidReceiptSchema, req.body ?? {});
@@ -397,6 +411,15 @@ receiptRouter.post(
       include: RECEIPT_INCLUDE,
     });
 
+    await record({
+      businessId,
+      actorId: req.auth!.userId,
+      action: AUDIT_ACTIONS.receiptVoided,
+      resourceType: "receipt",
+      resourceId: updated.id,
+      metadata: { receipt_number: updated.receipt_number, reason: input.reason ?? null },
+    });
+
     res.json(await toReceiptDTO(updated));
   }),
 );
@@ -407,6 +430,7 @@ receiptRouter.post(
  */
 receiptRouter.post(
   "/:id/reissue",
+  requirePermission("receipt.reissue"),
   asyncH(async (req, res) => {
     const businessId = req.auth!.businessId;
     const input = parse(reissueReceiptSchema, req.body ?? {});
@@ -457,6 +481,19 @@ receiptRouter.post(
       });
     });
 
+    await record({
+      businessId,
+      actorId: req.auth!.userId,
+      action: AUDIT_ACTIONS.receiptReissued,
+      resourceType: "receipt",
+      resourceId: reissued.id,
+      metadata: {
+        new_number: reissued.receipt_number,
+        replaces_receipt_id: original.id,
+        replaces_number: original.receipt_number,
+      },
+    });
+
     res.status(201).json(await toReceiptDTO(reissued));
   }),
 );
@@ -467,6 +504,7 @@ receiptRouter.post(
 
 receiptRouter.post(
   "/:id/share",
+  requirePermission("receipt.read"),
   asyncH(async (req, res) => {
     const businessId = req.auth!.businessId;
     const input = parse(shareReceiptSchema, req.body ?? {});
@@ -485,6 +523,7 @@ receiptRouter.post(
 
 receiptRouter.post(
   "/:id/email",
+  requirePermission("receipt.read"),
   asyncH(async (req, res) => {
     const businessId = req.auth!.businessId;
     const input = parse(emailReceiptSchema, req.body);

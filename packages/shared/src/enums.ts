@@ -1,6 +1,8 @@
 import { round2 } from "./money";
+import type { Role } from "./rbac";
 
-export type Role = "owner" | "staff";
+export type { Role };
+
 export type PaymentMethod = "cash" | "transfer" | "card" | "other";
 export type PaymentStatus = "paid" | "partial" | "pending";
 export type ReceiptStatus = "active" | "void";

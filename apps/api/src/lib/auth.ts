@@ -1,6 +1,7 @@
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 import type { Response } from "express";
+import type { Role } from "@eleos/shared";
 import { env } from "./env";
 import type { AuthContext } from "../middleware/requireAuth";
 
@@ -48,12 +49,24 @@ export function verifySession(token: string): AuthContext | null {
     return {
       userId: payload.userId,
       businessId: payload.businessId,
-      role: payload.role === "staff" ? "staff" : "owner",
+      // Recognise only the four known roles. A token minted by an older build
+      // carries `owner`/`staff` and keeps working; anything unrecognised
+      // resolves to `viewer`, the most restrictive role, rather than to
+      // `owner` — an unknown value must never widen access.
+      role: normaliseRole(payload.role),
       email: typeof payload.email === "string" ? payload.email : "",
     };
   } catch {
     return null;
   }
+}
+
+const KNOWN_ROLES = new Set<Role>(["owner", "admin", "staff", "viewer"]);
+
+function normaliseRole(value: unknown): Role {
+  return typeof value === "string" && KNOWN_ROLES.has(value as Role)
+    ? (value as Role)
+    : "viewer";
 }
 
 /**
