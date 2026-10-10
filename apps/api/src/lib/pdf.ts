@@ -81,24 +81,76 @@ async function getBrowser(): Promise<Browser> {
   return browserPromise;
 }
 
-/** Render an HTML document to an A4 PDF buffer. */
-export async function htmlToPdf(html: string): Promise<Buffer> {
+/* ---------------------------------- Page --------------------------------- */
+
+/**
+ * A4 in CSS pixels at the 96dpi CSS reference.
+ *
+ * Derived from millimetres rather than hard-coded so the relationship to the
+ * PDF stays visible: `page.pdf({ format: "A4" })` lays the sheet out in exactly
+ * this box, and the PNG is rendered in exactly the same box at the same width.
+ * That equality is what makes the two exports the same document — a viewport
+ * even 100px wider reflows every line of body text, so the image and the PDF
+ * stop showing the same thing.
+ */
+const CSS_PX_PER_MM = 96 / 25.4;
+const A4_WIDTH_PX = Math.round(210 * CSS_PX_PER_MM); // 794
+const A4_HEIGHT_PX = Math.round(297 * CSS_PX_PER_MM); // 1123
+
+/** The shared browser, for tests that need to render under a specific media type. */
+export const getBrowserForTest = getBrowser;
+
+/**
+ * Load a document into a page configured the way every export wants it.
+ *
+ * Both exports go through here because the differences that make an image and
+ * a PDF disagree are all in this block:
+ *
+ *  - **`emulateMediaType("print")`** — the templates carry a `@media print`
+ *    block that changes the sheet itself: it drops the 28px page padding,
+ *    stretches the frame to the full bleed, squares off the rounded corners and
+ *    removes the side borders. Rendering the PNG under screen media instead
+ *    produced a *different document* — a narrower, rounded, padded card with
+ *    the watermark in a different place — which is precisely the "why does the
+ *    image not match the PDF" bug.
+ *  - **A4 viewport** — so line breaking matches the PDF page.
+ *
+ * @param media Overridable so a test can render the same HTML both ways and
+ *   compare, which is how the parity assertions are made concrete.
+ */
+async function prepareDocument(html: string, media: "screen" | "print" = "print") {
   const browser = await getBrowser();
   const page = await browser.newPage();
 
   try {
-    await page.emulateMediaType("print");
+    await page.emulateMediaType(media);
+    await page.setViewport({
+      width: A4_WIDTH_PX,
+      height: A4_HEIGHT_PX,
+      deviceScaleFactor: 2,
+    });
     await page.setContent(html, { waitUntil: "load", timeout: 30_000 });
 
-    // Give webfonts a chance to arrive, but never block the receipt on them —
-    // the fallback stack renders correctly, just with different metrics.
-    // (String form: the API package has no DOM lib, and this code runs in the
-    // browser context, not here.)
+    // Give webfonts a chance to arrive, but never block the document on them —
+    // the fallback stack renders correctly, just with different metrics. (String
+    // form: the API package has no DOM lib, and this runs in the page context.)
     await Promise.race([
       page.evaluate("document.fonts && document.fonts.ready"),
       new Promise((resolve) => setTimeout(resolve, 4_000)),
     ]);
 
+    return page;
+  } catch (error) {
+    await page.close().catch(() => undefined);
+    throw error;
+  }
+}
+
+/** Render an HTML document to an A4 PDF buffer. */
+export async function htmlToPdf(html: string): Promise<Buffer> {
+  const page = await prepareDocument(html);
+
+  try {
     const pdf = await page.pdf({
       format: "A4",
       printBackground: true,
@@ -131,28 +183,23 @@ export async function renderInvoicePdf(data: InvoiceDocumentData): Promise<Buffe
  * element in the browser — produces a picture of whatever the user's screen
  * happened to show: clipped to the viewport, styled by the app's CSS, at
  * whatever device pixel ratio the device reports. Rendering the same HTML the
- * PDF is built from, in the same headless browser, means the exported image
- * and the exported PDF are the same document — watermark, branding, totals and
- * all.
+ * PDF is built from, in the same headless browser, under the same print media
+ * and the same A4 viewport, means the exported image and the exported PDF are
+ * the same document — watermark, branding, QR, totals and all.
  *
- * `scale: 2` doubles the pixel density, so the PNG is roughly 1588px wide on
- * A4 and stays crisp when a customer opens it on a phone or prints it.
+ * `deviceScaleFactor: 2` (set in `prepareDocument`) doubles the pixel density,
+ * so the PNG is 1588px wide on A4 and stays crisp when a customer opens it on a
+ * phone or prints it.
+ *
+ * `fullPage` captures the document's true height, so a long itemisation is
+ * never cut off at the fold. Where a document really does run past one page the
+ * caller gets one tall image rather than a silently truncated first page —
+ * losing the tail of a receipt would be worse than an extra-long export.
  */
 export async function htmlToPng(html: string): Promise<Buffer> {
-  const browser = await getBrowser();
-  const page = await browser.newPage();
+  const page = await prepareDocument(html);
 
   try {
-    // A4 at 96dpi. `fullPage` then captures however tall the document
-    // actually is, so a long itemisation is never cut off at the fold.
-    await page.setViewport({ width: 900, height: 1400, deviceScaleFactor: 2 });
-    await page.setContent(html, { waitUntil: "load", timeout: 30_000 });
-
-    await Promise.race([
-      page.evaluate("document.fonts && document.fonts.ready"),
-      new Promise((resolve) => setTimeout(resolve, 4_000)),
-    ]);
-
     const png = await page.screenshot({
       fullPage: true,
       type: "png",

@@ -340,7 +340,13 @@ receiptRouter.get(
     const receipt = await loadReceipt(businessId, pathParam(req, "id"));
     const business = await loadBusinessFor(businessId);
 
-    const buffer = await renderReceiptPng(await buildDocumentData(receipt, business, null));
+    // The same verification URL the PDF and the preview are built with, so the
+    // exported image carries the same QR code. Passing `null` here — which this
+    // did — silently dropped the QR from every downloaded image while the PDF
+    // still had one, so the two exports were not the same document.
+    const buffer = await renderReceiptPng(
+      await buildDocumentData(receipt, business, verificationUrl(req, receipt.id)),
+    );
 
     res
       .status(200)
