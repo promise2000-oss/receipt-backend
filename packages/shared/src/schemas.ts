@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { PAYMENT_METHODS, PAYMENT_STATUSES } from "./enums";
-import { lineTotal, outstandingBalance } from "./money";
+import { MAX_MONEY, lineTotal, outstandingBalance, round2 } from "./money";
 import { MAX_WATERMARK_OPACITY } from "./brand";
 
 /** Deliberately regex-based rather than `z.email()` so behaviour is stable
@@ -169,14 +169,49 @@ export const receiptItemSchema = z
     unit_price: amountField,
   })
   .superRefine((item, ctx) => {
-    if (lineTotal(item.quantity, item.unit_price) <= 0) {
+    const total = lineTotal(item.quantity, item.unit_price);
+    if (total <= 0) {
       ctx.addIssue({
         code: "custom",
         message: "Line total must be greater than zero",
         path: ["unit_price"],
       });
+      return;
+    }
+
+    // The product is bounded separately from the two fields. Both operands can
+    // sit comfortably inside `amountField` and still multiply out past what a
+    // `Decimal(14, 2)` column can store, which reaches Postgres as a 500 rather
+    // than a validation error.
+    if (total > MAX_MONEY) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Line total is too large — reduce the quantity or the price",
+        path: ["unit_price"],
+      });
     }
   });
+
+/**
+ * A document total that no `Decimal(14, 2)` column can hold.
+ *
+ * Per-line bounds are not sufficient on their own: a receipt may carry up to 200
+ * lines, and 200 individually legal line totals still sum past the column. This
+ * runs on the summed figure so the user is told which document is too large
+ * rather than meeting a database error.
+ */
+function maxTotalIssue(ctx: z.RefinementCtx, items: Array<{ quantity: number; unit_price: number }>, path: (string | number)[]) {
+  const subtotal = round2(
+    items.reduce((sum, item) => sum + lineTotal(item.quantity, item.unit_price), 0),
+  );
+  if (subtotal > MAX_MONEY) {
+    ctx.addIssue({
+      code: "custom",
+      message: "This document's total is too large — split it into several documents",
+      path,
+    });
+  }
+}
 
 export const receiptCreateSchema = z.object({
   customer_id: z.string().trim().min(1).nullish(),
@@ -207,7 +242,8 @@ export const receiptCreateSchema = z.object({
     .max(1000)
     .nullish()
     .transform((v) => (v ? v : null)),
-});
+})
+  .superRefine((doc, ctx) => maxTotalIssue(ctx, doc.items, ["items"]));
 export type ReceiptCreateInput = z.infer<typeof receiptCreateSchema>;
 
 export const voidReceiptSchema = z.object({
@@ -274,10 +310,24 @@ export const invoiceItemSchema = z
     unit_price: amountField,
   })
   .superRefine((item, ctx) => {
-    if (lineTotal(item.quantity, item.unit_price) <= 0) {
+    const total = lineTotal(item.quantity, item.unit_price);
+    if (total <= 0) {
       ctx.addIssue({
         code: "custom",
         message: "Line total must be greater than zero",
+        path: ["unit_price"],
+      });
+      return;
+    }
+
+    // The product is bounded separately from the two fields. Both operands can
+    // sit comfortably inside `amountField` and still multiply out past what a
+    // `Decimal(14, 2)` column can store, which reaches Postgres as a 500 rather
+    // than a validation error.
+    if (total > MAX_MONEY) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Line total is too large — reduce the quantity or the price",
         path: ["unit_price"],
       });
     }
@@ -331,6 +381,8 @@ export const invoiceCreateSchema = z
         path: ["due_date"],
       });
     }
+
+    maxTotalIssue(ctx, invoice.items, ["items"]);
   });
 export type InvoiceCreateInput = z.infer<typeof invoiceCreateSchema>;
 

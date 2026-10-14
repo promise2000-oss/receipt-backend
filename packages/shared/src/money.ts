@@ -20,6 +20,22 @@ export interface ComputedTotals {
   total: number;
 }
 
+/**
+ * The largest amount a single money column can hold.
+ *
+ * Every monetary column in the schema is `@db.Decimal(14, 2)`: twelve digits
+ * before the decimal point. Postgres enforces that, so anything at or above
+ * 10^12 fails the INSERT with SQLSTATE 22003 "numeric field overflow".
+ *
+ * This constant exists because the *inputs* and the *computed totals* have to be
+ * bounded separately. Validating `unit_price` on its own is not enough: a line
+ * of quantity 999,999 at ₦9,876,543.21 is individually legal at every field
+ * and still multiplies out past the column. Without a bound on the product, the
+ * user got a 500 — "Something went wrong on our side" — for typing a large
+ * number, which is the least useful possible answer.
+ */
+export const MAX_MONEY = 999_999_999_999.99;
+
 /** quantity × unit price, rounded. */
 export function lineTotal(quantity: number, unitPrice: number): number {
   return round2(Number(quantity || 0) * Number(unitPrice || 0));
